@@ -93,9 +93,8 @@ def to_csv(rows: list[dict]) -> str:
     writer = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        # Scraped/imported text can't become a spreadsheet formula. Phone
-        # numbers legitimately start with "+", so they're left as they are.
-        writer.writerow({k: (v if k == "phone" else csv_safe(v)) for k, v in row.items()})
+        # Scraped/imported text can't become a spreadsheet formula.
+        writer.writerow({k: csv_safe(v) for k, v in row.items()})
     return buf.getvalue()
 
 

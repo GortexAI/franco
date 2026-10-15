@@ -35,26 +35,45 @@ NATIVE_BATCH_CAP = 8
 LEGACY_BATCH_CAP = 50
 
 
-_URL_RE = re.compile(r"(?:https?://|www\.)[^\s<>()\"']+", re.IGNORECASE)
+# Anything a mail client could turn into a link: a scheme URL, or a bare
+# domain ("phish.example/login"). Group 1 is the host.
+_LINK_RE = re.compile(
+    r"(?<![@\w.-])(?:[a-z][a-z0-9+.-]*://)?((?:[a-z0-9-]+\.)+[a-z]{2,24})"
+    r"(?:[/:?#][^\s<>()\"']*)?", re.IGNORECASE)
 _HTML_RE = re.compile(r"<\s*/?\s*[a-z][^>]*>", re.IGNORECASE)
 
 
+def _bare(url: str) -> str:
+    url = (url or "").strip().rstrip("/.,;:!?").lower()
+    for prefix in ("https://", "http://", "www."):
+        url = url.removeprefix(prefix)
+    return url.rstrip("/")
+
+
 def raad_draft_problem(subject: str, body: str, landing_url: str,
-                       blocked: list[str]) -> str:
+                       blocked: list[str], company_domain: str = "") -> str:
     """Rules enforced in code on a model-written raad draft, whatever the
-    prompt (or text injected into it) said: no blocked claims, no link but
-    the funnel's own landing page, no HTML."""
+    prompt (or text injected into it) said: no blocked claims, no HTML, and
+    no link or domain except the funnel's landing page (exactly) or a bare
+    mention of the prospect's own domain."""
     text = f"{subject}\n{body}"
     lowered = text.lower()
     hit = next((b for b in blocked if b and b.lower() in lowered), "")
     if hit:
         return f"blocked claim '{hit}'"
-    allowed = (landing_url or "").rstrip("/").lower()
-    for url in _URL_RE.findall(text):
-        if not allowed or url.rstrip("/.,;:!?").lower() != allowed:
-            return f"link not allowed ({url[:60]})"
+    landing = _bare(landing_url)
+    own = _bare(company_domain)
+    for m in _LINK_RE.finditer(text):
+        token = _bare(m.group(0))
+        if landing and token == landing:
+            continue
+        if own and token == own:
+            continue
+        return f"link not allowed ({m.group(0)[:60]})"
     if _HTML_RE.search(text):
         return "HTML in draft"
+    if re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", text):
+        return "email address in draft"   # replies go to the sender, nowhere else
     return ""
 
 
@@ -553,7 +572,8 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
         body = str(result.get("body") or "").strip()
         if not subject or not body:
             return None
-        problem = raad_draft_problem(subject, body, funnel.landing_url, blocked)
+        problem = raad_draft_problem(subject, body, funnel.landing_url, blocked,
+                                     company_domain=company.domain)
         if problem:
             logger.warning(f"Writer (raad): draft for {prospect.email} discarded: {problem}.")
             return None

@@ -380,3 +380,16 @@ def test_csv_exports_neutralise_formulas():
     row = preview_record({"to_email": "a@b.co", "body": "-2+3", "context": {"observation": "=cmd()"}})
     assert row["body"] == "'-2+3" and row["observation"] == "'=cmd()"
     assert "'=evil()" in suppressions_csv([{"value": "x@y.co", "reason": "=evil()"}])
+
+
+def test_bare_domains_and_addresses_count_as_links():
+    from franco.agents.writer import raad_draft_problem
+    page = "https://example.com/marketplaces"
+    own = "tradeloft.example"
+    assert "link" in raad_draft_problem("s", "visit phish.example/login", page, [], own)
+    assert "link" in raad_draft_problem("s", "example.com/other", page, [], own)
+    assert "link" in raad_draft_problem("s", "//evil.example", page, [], own)
+    assert "email" in raad_draft_problem("s", "write to x@evil.example", page, [], own)
+    assert raad_draft_problem("s", "HTTPS://EXAMPLE.COM/marketplaces", page, [], own) == ""
+    assert raad_draft_problem("s", "tradeloft.example lists sellers", page, [], own) == ""
+    assert raad_draft_problem("s", "It is 3.5 times. E.g. at 9 a.m.", page, [], own) == ""
