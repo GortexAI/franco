@@ -393,3 +393,11 @@ def test_bare_domains_and_addresses_count_as_links():
     assert raad_draft_problem("s", "HTTPS://EXAMPLE.COM/marketplaces", page, [], own) == ""
     assert raad_draft_problem("s", "tradeloft.example lists sellers", page, [], own) == ""
     assert raad_draft_problem("s", "It is 3.5 times. E.g. at 9 a.m.", page, [], own) == ""
+
+
+def test_ip_scheme_and_punycode_links_are_rejected():
+    from franco.agents.writer import raad_draft_problem
+    page = "https://example.com/marketplaces"
+    for text in ("http://1.2.3.4/x", "go to 10.0.0.1", "_evil.example", ".evil.example",
+                 "xn--80ak6aa92e.com", "ftp://x", "javascript://alert", "http://[::1]/"):
+        assert raad_draft_problem("s", text, page, []), text

@@ -35,11 +35,14 @@ NATIVE_BATCH_CAP = 8
 LEGACY_BATCH_CAP = 50
 
 
-# Anything a mail client could turn into a link: a scheme URL, or a bare
-# domain ("phish.example/login"). Group 1 is the host.
-_LINK_RE = re.compile(
-    r"(?<![@\w.-])(?:[a-z][a-z0-9+.-]*://)?((?:[a-z0-9-]+\.)+[a-z]{2,24})"
-    r"(?:[/:?#][^\s<>()\"']*)?", re.IGNORECASE)
+# Anything a mail client could turn into a link, checked in layers so one
+# clever spelling can't slip past a single pattern.
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_SCHEME_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s<>\"']*", re.IGNORECASE)
+_IP_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\[[0-9a-f:]+\]", re.IGNORECASE)
+_DOMAIN_RE = re.compile(
+    r"(?:[a-z0-9\u00a1-\uffff-]+\.)+(?:[a-z\u00a1-\uffff]{2,24}|xn--[a-z0-9-]+)"
+    r"(?:[/:?#][^\s<>\"']*)?", re.IGNORECASE)
 _HTML_RE = re.compile(r"<\s*/?\s*[a-z][^>]*>", re.IGNORECASE)
 
 
@@ -53,27 +56,33 @@ def _bare(url: str) -> str:
 def raad_draft_problem(subject: str, body: str, landing_url: str,
                        blocked: list[str], company_domain: str = "") -> str:
     """Rules enforced in code on a model-written raad draft, whatever the
-    prompt (or text injected into it) said: no blocked claims, no HTML, and
-    no link or domain except the funnel's landing page (exactly) or a bare
-    mention of the prospect's own domain."""
+    prompt (or text injected into it) said: no blocked claims, no HTML, no
+    email address, no IP address, and no URL or domain except the funnel's
+    landing page (exactly) or a bare mention of the prospect's own domain."""
     text = f"{subject}\n{body}"
     lowered = text.lower()
     hit = next((b for b in blocked if b and b.lower() in lowered), "")
     if hit:
         return f"blocked claim '{hit}'"
-    landing = _bare(landing_url)
-    own = _bare(company_domain)
-    for m in _LINK_RE.finditer(text):
-        token = _bare(m.group(0))
-        if landing and token == landing:
-            continue
-        if own and token == own:
-            continue
-        return f"link not allowed ({m.group(0)[:60]})"
     if _HTML_RE.search(text):
         return "HTML in draft"
-    if re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", text):
+    if _EMAIL_RE.search(text):
         return "email address in draft"   # replies go to the sender, nowhere else
+    landing, own = _bare(landing_url), _bare(company_domain)
+
+    def allowed(token: str) -> bool:
+        t = _bare(token)
+        return bool((landing and t == landing) or (own and t == own))
+
+    for m in _SCHEME_RE.finditer(text):
+        if not (landing and _bare(m.group(0)) == landing):
+            return f"link not allowed ({m.group(0)[:60]})"
+    text = _SCHEME_RE.sub(" ", text)          # the landing page, checked above
+    if _IP_RE.search(text):
+        return "IP address in draft"
+    for m in _DOMAIN_RE.finditer(text):
+        if not allowed(m.group(0)):
+            return f"link not allowed ({m.group(0)[:60]})"
     return ""
 
 
