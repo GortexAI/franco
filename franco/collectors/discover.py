@@ -771,7 +771,7 @@ async def run_discovery(
                     # A failure is an observation about the run, not a reason
                     # to lose the queries that already succeeded.
                     logger.warning("discover: %s failed on %s: %s",
-                                   provider_key, _log_safe(query.keyword()), _log_safe(e))
+                                   _log_safe(provider_key), _log_safe(query.keyword()), _log_safe(e))
                     report.errors.append(f"{query.keyword()}: {e}")
                     continue
 
