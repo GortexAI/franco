@@ -78,3 +78,21 @@ def test_setup_secrets_use_hidden_input_only(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda p: pytest.fail("secret read with input()"))
     assert setup._ask_secret("API key") == "s3cret"
     assert asked and "API key" in asked[0]
+
+
+# py/stack-trace-exposure via run reports: the dashboard shows fixed wording.
+
+def test_discovery_reports_never_carry_exception_text():
+    import httpx
+    from franco.collectors.discover import describe_error
+    req = httpx.Request("GET", "https://api.example/x?api_key=SECRET")
+    cases = [
+        httpx.ReadTimeout("slow", request=req),
+        httpx.HTTPStatusError("401 for https://api.example/x?api_key=SECRET",
+                              request=req, response=httpx.Response(401, request=req)),
+        httpx.ConnectError("refused api_key=SECRET", request=req),
+        RuntimeError("/Users/someone/franco/data/franco.db is locked"),
+    ]
+    for e in cases:
+        text = describe_error(e)
+        assert "SECRET" not in text and "/Users" not in text and "log" in text

@@ -21,6 +21,7 @@ minor versions can still change behaviour.
   - **Bad HTML tag filter (1, high):** script and style stripping now handles end tags like `</script >`.
   - **Stack-trace exposure (20, medium):** every dashboard endpoint logs the exception and returns a generic message.
   - **Log injection (1, medium):** newlines are removed from search terms and errors before logging.
+  - **Stack-trace exposure via run reports:** discovery and profile reports (shown on the dashboard and stored in `runs`) no longer carry raw exception text. Franco's own explanations (`DiscoveryError`, e.g. "OpenStreetMap has no category for 'widgets'") are shown as written; anything else is reported as "timed out", "network error" or "failed", with the details in the log.
 
 ### Added
 

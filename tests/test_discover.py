@@ -308,7 +308,8 @@ async def test_a_failed_query_does_not_lose_the_successful_ones(state, config, r
     report = await D.run_discovery(state, config, "fake", q)
 
     assert report.new_companies == 2
-    assert len(report.errors) == 1 and "boom" in report.errors[0]
+    assert len(report.errors) == 1
+    assert "network error" in report.errors[0] and "boom" not in report.errors[0]
     runs = await state.get_runs()
     assert runs[0]["status"] == "completed"
 
@@ -650,7 +651,7 @@ async def test_an_unmappable_term_is_reported_not_silently_skipped(
     monkeypatch.setitem(D.PROVIDERS, "osm", D.OpenStreetMap())
 
     async def fake_fetch(self, client, env, query):
-        raise RuntimeError("OpenStreetMap has no category for 'widgets'")
+        raise D.DiscoveryError("OpenStreetMap has no category for 'widgets'")
     monkeypatch.setattr(D.OpenStreetMap, "fetch", fake_fetch)
 
     report = await D.run_discovery(state, config, "osm",

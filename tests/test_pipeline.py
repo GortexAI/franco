@@ -199,7 +199,8 @@ async def test_a_failing_profile_stage_does_not_lose_the_discovery(
     report = await P.run_prospecting(state, config, "fake",
                                      [D.DiscoveryQuery(term="roofer")])
     assert report.discover["new_companies"] == 1, "the companies are still saved"
-    assert any("network gone" in e for e in report.errors)
+    assert any(e.startswith("profile: failed") for e in report.errors)
+    assert not any("network gone" in e for e in report.errors)   # details stay in the log
 
 
 @pytest.mark.asyncio
