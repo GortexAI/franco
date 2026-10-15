@@ -12,6 +12,7 @@ design). Every draft still passes the deterministic pre-send gate.
 import json
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 import pytz
@@ -59,7 +60,10 @@ def raad_draft_problem(subject: str, body: str, landing_url: str,
     prompt (or text injected into it) said: no blocked claims, no HTML, no
     email address, no IP address, and no URL or domain except the funnel's
     landing page (exactly) or a bare mention of the prospect's own domain."""
-    text = f"{subject}\n{body}"
+    # Normalise first: mail clients and IDNA treat full-width and
+    # ideographic full stops as dots, so "evil。com" is a working link.
+    text = unicodedata.normalize("NFKC", f"{subject}\n{body}")
+    text = text.translate({0x3002: ".", 0xFF0E: ".", 0xFF61: "."})
     lowered = text.lower()
     hit = next((b for b in blocked if b and b.lower() in lowered), "")
     if hit:

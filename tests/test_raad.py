@@ -401,3 +401,10 @@ def test_ip_scheme_and_punycode_links_are_rejected():
     for text in ("http://1.2.3.4/x", "go to 10.0.0.1", "_evil.example", ".evil.example",
                  "xn--80ak6aa92e.com", "ftp://x", "javascript://alert", "http://[::1]/"):
         assert raad_draft_problem("s", text, page, []), text
+
+
+def test_unicode_dots_cannot_hide_a_domain():
+    from franco.agents.writer import raad_draft_problem
+    page = "https://example.com/marketplaces"
+    for text in ("evil。com", "evil．com/login", "evil｡com", "ｅｖｉｌ.ｃｏｍ"):
+        assert "link" in raad_draft_problem("s", text, page, []), text
