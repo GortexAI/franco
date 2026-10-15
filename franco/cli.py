@@ -488,61 +488,60 @@ async def _edit_outbox_item(state, item_id: str):
 
 
 def cmd_import(args):
-    """Import hand-researched accounts from a CSV."""
+    """Import a list from a CSV: researched accounts, contacts, or suppressions."""
     from franco.config import load_config, load_env
-    from franco.importer import TEMPLATE, import_accounts, read_rows
+    from franco.importer import KINDS, TEMPLATES, default_kind, make_verifier, run_import
     from franco.state import StateManager
 
+    config = load_config()
+    kind = args.kind or default_kind(config)
     if args.template:
-        sys.stdout.write(TEMPLATE)
+        sys.stdout.write(TEMPLATES[kind])
         return
     if not args.file:
-        print("\n  Usage: franco import accounts.csv [--dry-run] [--verify]")
-        print("  Start from the column template: franco import --template > accounts.csv\n")
+        print("\n  Usage: franco import FILE.csv [--kind accounts|contacts|suppressions]"
+              " [--dry-run] [--verify]")
+        print(f"  Start from a template: franco import --template --kind {kind} > {kind}.csv\n")
+        sys.exit(2)
+    if kind not in KINDS:
+        print(f"\n  --kind must be one of {', '.join(KINDS)}.\n")
         sys.exit(2)
 
-    config = load_config()
-    campaigns = set(config.outreach.campaigns)
-    if not campaigns:
-        print("\n  No approved campaigns configured (outreach.campaigns is empty).\n")
+    campaigns = set(config.outreach.sequence_keys())
+    if kind == "accounts" and not campaigns:
+        print("\n  No approved campaigns or funnels configured (outreach.campaigns / outreach.funnels)."
+              "\n  For a plain company/contact list use --kind contacts.\n")
         sys.exit(1)
     with open(args.file, encoding="utf-8-sig") as f:
-        rows = read_rows(f.read())
-
-    verify = None
-    if args.verify:
-        from franco.integrations.email_finder import (
-            _verify_candidate, classify_mx, get_mx_host,
-        )
-        env = load_env()
-
-        async def verify(email):
-            mx = await get_mx_host(email.split("@", 1)[1])
-            if not mx:
-                return "invalid"
-            status, _ = await _verify_candidate(email, classify_mx(mx), env)
-            return status
+        text = f.read()
+    verify = make_verifier(load_env()) if args.verify and kind != "suppressions" else None
 
     async def _import():
         state = StateManager()
         await state.init_db()
-        report = await import_accounts(
-            state, rows, campaigns, default_owner=args.owner,
-            verify=verify, dry_run=args.dry_run,
+        report = await run_import(
+            state, kind, text, campaigns, default_owner=args.owner,
+            verify=verify, dry_run=args.dry_run, source=f"import:{args.file}",
         )
-        verb = "Valid" if args.dry_run else "Imported"
-        print(f"\n  {verb}: {len(report.imported)}   Rejected: {len(report.rejected)}"
-              f"   (of {len(rows)} rows)")
+        verb = "Valid" if args.dry_run else ("Added" if kind == "suppressions" else "Imported")
+        total = len(report.imported) + len(report.rejected) + (
+            len(report.warnings) if kind == "suppressions" else 0)
+        print(f"\n  {kind}: {verb} {len(report.imported)}   Rejected: {len(report.rejected)}"
+              f"   (of {total} rows)")
         for n, why in report.rejected:
             print(f"    ✗ row {n}: {why}")
         for n, why in report.warnings:
             print(f"    ! row {n}: {why}")
         if report.imported and not args.dry_run:
-            print("\n  Approved copy is staged on the next `franco run` cycle;"
-                  " review it with `franco outbox` or the dashboard Outbox.")
-            if not args.verify:
-                print("  Only addresses marked verified are emailed: set email_status"
-                      " in the file or re-run with --verify.")
+            if kind == "accounts":
+                print("\n  Approved copy is staged on the next `franco run` cycle."
+                      " Review the preview with `franco preview`.")
+            elif kind == "contacts":
+                print("\n  Franco profiles these companies and writes for deliverable"
+                      " contacts on the next `franco run` cycles.")
+            if kind != "suppressions" and not args.verify:
+                print("  Only verified addresses are emailed: set email_status in the"
+                      " file or re-run with --verify.")
         print()
 
     asyncio.run(_import())
@@ -565,20 +564,20 @@ def cmd_suppress(args):
                 gone = await state.remove_suppression(value)
                 print(f"  {'Removed' if gone else 'Not listed'}: {value}")
         elif action == "import":
+            from franco.importer import import_suppressions, read_suppressions
             added = 0
             for path in args.values:
                 with open(path, encoding="utf-8-sig") as f:
-                    for line in f:
-                        value = line.split(",", 1)[0].strip().strip('"')
-                        if value and value.lower() not in ("email", "domain", "value"):
-                            added += await state.add_suppression(
-                                value, reason=args.reason, source=f"import:{path}")
+                    report = await import_suppressions(
+                        state, read_suppressions(f.read()), default_reason=args.reason,
+                        source=f"import:{path}")
+                added += len(report.imported)
+                for n, why in report.rejected:
+                    print(f"    ✗ {path} row {n}: {why}")
             print(f"\n  Added {added} new suppression(s).\n")
         elif action == "export":
-            sys.stdout.write("value,kind,reason,source,created_at\n")
-            for row in await state.list_suppressions():
-                sys.stdout.write(",".join(str(row[k] or "") for k in
-                                 ("value", "kind", "reason", "source", "created_at")) + "\n")
+            from franco.importer import suppressions_csv
+            sys.stdout.write(suppressions_csv(await state.list_suppressions()))
         else:
             rows = await state.list_suppressions()
             print(f"\n  {len(rows)} suppressed address(es)/domain(s)")
@@ -770,6 +769,154 @@ def _config_requires_approval() -> bool:
         return True
 
 
+def cmd_preview(args):
+    """Review an approved-copy campaign's preview batch, then sign it off."""
+    import csv
+    from franco.outreach import PREVIEW_CSV_COLUMNS, preview_record
+    from franco.state import StateManager
+
+    config = None
+    try:
+        from franco.config import load_config
+        config = load_config()
+    except Exception:
+        pass
+    keys = config.outreach.sequence_keys() if config else []
+    size = config.outreach.preview_accounts if config else 10
+
+    async def _run():
+        state = StateManager()
+        await state.init_db()
+        action, key = args.preview_action, args.campaign
+        if action not in ("list", "signoff", "reopen"):
+            action, key = "list", action     # `franco preview M1`
+
+        if action in ("signoff", "reopen"):
+            if not key:
+                print(f"\n  Name the campaign: franco preview {action} KEY"
+                      f"  ({', '.join(keys) or 'none configured'})\n")
+                sys.exit(2)
+            if keys and key not in keys:
+                print(f"\n  '{key}' is not a configured campaign or funnel ({', '.join(keys)}).\n")
+                sys.exit(1)
+            if action == "reopen":
+                await state.clear_signoff(key)
+                print(f"\n  {key} is back in preview: nothing more sends until it is"
+                      " signed off again.\n")
+                return
+            staged = await state.staged_accounts_by_owner(key)
+            by = args.by or (config.persona.name if config else "") or "unknown"
+            await state.set_signoff(key, by)
+            print(f"\n  {key} signed off by {by}. Its emails can now send"
+                  f" ({sum(staged.values())} account(s) staged so far), and the rest"
+                  " of its accounts stage on the next cycle.")
+            if await state.approval_required(_config_requires_approval()):
+                print("  Each email still needs approval: franco outbox"
+                      " (or franco autopilot on).")
+            print()
+            return
+
+        rows = [preview_record(i) for i in await state.preview_rows(key)]
+        if args.csv:
+            with open(args.csv, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=PREVIEW_CSV_COLUMNS)
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"\n  Wrote {len(rows)} preview row(s) to {args.csv}.\n")
+            return
+
+        for k in ([key] if key else keys):
+            signoff = await state.get_signoff(k)
+            staged = await state.staged_accounts_by_owner(k)
+            owners = ", ".join(f"{o or 'no owner'}: {n}" for o, n in staged.items()) or "none"
+            state_line = (f"signed off by {signoff.get('by')} {signoff.get('at', '')[:10]}"
+                          if signoff else
+                          f"IN PREVIEW: up to {size} account(s) per owner, nothing sends")
+            print(f"\n  {k}: {state_line}\n     staged accounts by owner: {owners}")
+        for r in rows:
+            print(f"\n  ── {r['campaign']} · {r['company']} ({r['domain']}) · owner {r['owner'] or '-'}")
+            print(f"     Buyer:    {r['buyer']}, {r['title']} <{r['email']}>")
+            print(f"     Observed: {r['observation']}")
+            print(f"     Source:   {r['source_url']} (checked {r['checked']})")
+            print(f"     Status:   {r['status']}")
+            print(f"     Subject:  {r['subject']}")
+            for line in r["body"].splitlines():
+                print(f"     | {line}")
+        if not rows:
+            print("\n  Nothing staged yet. Import accounts (franco import FILE.csv)"
+                  " and let one `franco run` cycle stage them.")
+        else:
+            print("\n  Share it: franco preview --csv preview.csv"
+                  "   Sign off: franco preview signoff KEY --by NAME")
+        print()
+
+    asyncio.run(_run())
+
+
+def cmd_funnels(args):
+    """Raad mode: how your companies split across funnels, or why one landed where it did."""
+    from franco.config import load_config
+    from franco.funnels import company_facts, funnel_report, place, validate_funnels
+    from franco.state import StateManager
+
+    outreach = load_config().outreach
+    if not outreach.funnels:
+        print("\n  No funnels configured (outreach.funnels). See README → Raad mode.\n")
+        return
+    problems = validate_funnels(outreach)
+    if problems:
+        print("\n  Funnel conditions need fixing:")
+        for p in problems:
+            print(f"    ✗ {p}")
+        print()
+        sys.exit(1)
+
+    async def _run():
+        state = StateManager()
+        await state.init_db()
+        if args.company:
+            company = await state.get_company_by_domain(args.company.lower().removeprefix("www."))
+            if company is None:
+                print(f"\n  No company with domain {args.company}.\n")
+                return
+            facts = await company_facts(state, company.id)
+            placement = place(outreach, company, facts)
+            print(f"\n  {company.name} ({company.domain})")
+            if placement.funnel:
+                print(f"  → {placement.funnel}: {outreach.funnels[placement.funnel].name}")
+                print(f"    because: {'; '.join(placement.reasons)}")
+                for f in placement.facts:
+                    print(f"    fact: {f['signal_code']} = {f.get('value_text') or f.get('value_num')}"
+                          f"  ({f.get('evidence_url') or 'no source'})")
+            else:
+                print("  → no funnel matches. What Franco knows:")
+                for code, f in sorted(facts.items()):
+                    print(f"    {code} = {f.get('value_text') or f.get('value_num')}")
+            print()
+            return
+
+        benefits = {b.key: b.text for b in outreach.benefits}
+        print("\n  Customer benefits (every message lives in one):")
+        for key, text in benefits.items():
+            print(f"    {key}: {text}")
+        report = await funnel_report(state, outreach)
+        for key, row in report["funnels"].items():
+            signoff = await state.get_signoff(key)
+            status = f"signed off by {signoff['by']}" if signoff else "in preview"
+            print(f"\n  {key} · {row['name']}  [{status}]")
+            print(f"    benefit: {row['benefit']}   landing: {row['landing_url'] or '-'}")
+            print(f"    match:   {' AND '.join(row['require']) or 'anything'}"
+                  + (f"   but not {', '.join(row['exclude'])}" if row["exclude"] else ""))
+            print(f"    {row['companies']} compan{'y' if row['companies'] == 1 else 'ies'},"
+                  f" {row['reachable']} with a verified new contact"
+                  + (f"  e.g. {', '.join(row['examples'])}" if row["examples"] else ""))
+        print(f"\n  Unplaced: {report['unplaced']}"
+              + (f"  e.g. {', '.join(report['unplaced_examples'])}" if report["unplaced_examples"] else ""))
+        print("  Why one company landed where it did: franco funnels --company DOMAIN\n")
+
+    asyncio.run(_run())
+
+
 def cmd_autopilot(args):
     """Toggle full email autopilot without editing config or restarting."""
     from franco.state import StateManager
@@ -923,10 +1070,13 @@ def main():
 
     # franco import accounts.csv
     sub = subparsers.add_parser(
-        "import", help="Import hand-researched accounts (CSV) for approved copy")
+        "import", help="Import a CSV list: researched accounts, contacts, or suppressions")
     sub.add_argument("file", nargs="?", default="", help="CSV file")
+    sub.add_argument("--kind", choices=["accounts", "contacts", "suppressions"], default="",
+                     help="What the file holds (default: accounts in approved-copy "
+                          "mode, contacts otherwise)")
     sub.add_argument("--template", action="store_true",
-                     help="Print the CSV column template and exit")
+                     help="Print the CSV column template for --kind and exit")
     sub.add_argument("--dry-run", action="store_true",
                      help="Validate every row without importing anything")
     sub.add_argument("--verify", action="store_true",
@@ -979,6 +1129,22 @@ def main():
     sub.add_argument("--reject", metavar="CODES", default="",
                      help="Comma-separated codes to turn off")
     sub.set_defaults(func=cmd_signals)
+
+    sub = subparsers.add_parser(
+        "funnels", help="Raad mode: how companies split across funnels")
+    sub.add_argument("--company", default="", metavar="DOMAIN",
+                     help="Explain which funnel one company is in, and why")
+    sub.set_defaults(func=cmd_funnels)
+
+    sub = subparsers.add_parser(
+        "preview", help="Review an approved-copy campaign's preview, then sign it off")
+    sub.add_argument("preview_action", nargs="?", default="list",
+                     help="list (default), signoff or reopen; or just a campaign key")
+    sub.add_argument("campaign", nargs="?", default="", help="Campaign key, e.g. M1")
+    sub.add_argument("--by", default="", help="With signoff: who is signing off")
+    sub.add_argument("--csv", default="", metavar="FILE",
+                     help="Write the preview (one row per account) to a CSV file")
+    sub.set_defaults(func=cmd_preview)
 
     sub = subparsers.add_parser(
         "autopilot", help="Send without review: on / off / default / status")

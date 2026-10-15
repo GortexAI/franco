@@ -11,6 +11,7 @@ import io
 import logging
 
 from franco.state import StateManager
+from franco.outreach import csv_safe
 
 logger = logging.getLogger("franco.export")
 
@@ -92,7 +93,8 @@ def to_csv(rows: list[dict]) -> str:
     writer = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row)
+        # Scraped/imported text can't become a spreadsheet formula.
+        writer.writerow({k: csv_safe(v) for k, v in row.items()})
     return buf.getvalue()
 
 

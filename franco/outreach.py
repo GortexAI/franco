@@ -105,8 +105,10 @@ def first_send_day(now_local: datetime, send_hour: int) -> date:
     """Day 1: today if it's a weekday and the send hour hasn't passed,
     otherwise the next weekday."""
     d = now_local.date()
-    if now_local.weekday() >= 5 or now_local.hour >= send_hour:
-        d = add_business_days(d, 1)
+    if now_local.weekday() >= 5:
+        return add_business_days(d, 0)    # the coming Monday
+    if now_local.hour >= send_hour:
+        return add_business_days(d, 1)
     return d
 
 
@@ -156,3 +158,42 @@ def compliance_problem(compliance) -> str:
         return ("compliance.postal_address is blank — every cold email must "
                 "carry a valid postal address, so nothing will be sent")
     return ""
+
+
+# ── CSV export ──
+
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(value) -> str:
+    """A cell a spreadsheet won't execute. Observations, email bodies and
+    names come from imported files and scraped pages, so a value starting
+    with = + - @ is prefixed with ' (OWASP CSV injection guidance)."""
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(_FORMULA_START) else text
+
+
+def csv_safe_row(row: dict) -> dict:
+    return {k: csv_safe(v) for k, v in row.items()}
+
+
+# ── Preview ──
+
+PREVIEW_CSV_COLUMNS = (
+    "campaign", "owner", "company", "domain", "buyer", "title", "email",
+    "observation", "source_url", "checked", "subject", "body", "status",
+)
+
+
+def preview_record(item: dict) -> dict:
+    """One preview row: the fields a reviewer signs off on."""
+    ctx = item.get("context") or {}
+    return csv_safe_row({
+        "campaign": item.get("campaign_key", ""), "owner": ctx.get("owner", ""),
+        "company": ctx.get("company", ""), "domain": ctx.get("domain", ""),
+        "buyer": ctx.get("name", ""), "title": ctx.get("title", ""),
+        "email": item.get("to_email", ""), "observation": ctx.get("observation", ""),
+        "source_url": ctx.get("source_url", ""), "checked": ctx.get("checked", ""),
+        "subject": item.get("subject", ""), "body": item.get("body", ""),
+        "status": item.get("status", ""),
+    })

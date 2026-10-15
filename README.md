@@ -4,10 +4,13 @@
 
 Franco works through a list of accounts. For each one it finds or imports a reason to write, sends a short email sequence from your own mailbox, reads the replies, and handles them. Every fact it uses is recorded with its source. You review every email before it sends, unless you turn on autopilot.
 
-It works in two ways:
+It works in three ways (`outreach.mode`):
 
-- **Generated outreach.** Franco finds businesses, reads their websites, picks the right person, and drafts a personalized sequence with the model.
-- **Approved-copy outreach.** You import accounts you researched yourself, with one sourced observation for each. Franco sends your approved sequences word for word: no model writes them, the schedule counts business days, and the compliance footer and suppression rules are enforced in code. This is the mode Gortex uses.
+- **Generated** (`generated`, the default). Franco finds businesses, reads their websites, picks the right person, and drafts a personalized sequence with the model.
+- **Approved copy** (`templates`). You import accounts you researched yourself, with one sourced observation for each. Franco sends your approved sequences word for word. No model writes them, the schedule counts business days, and the compliance footer and suppression rules are enforced in code. This is the mode Gortex uses today.
+- **Raad** (`raad`). Franco places every account in the narrowest *funnel* it fits, based on what it observed about the account (a marketplace that already runs AdSense is a different conversation from one with no ads). It then writes email 1 from that funnel's story, one customer benefit, the buyer's role and the account's own sourced fact, and follows up with the funnel's approved emails. [More below](#raad-mode).
+
+Bring your own lists as **CSV files**: researched accounts, plain company/contact lists, and do-not-contact lists. Use the terminal or the dashboard. Every new campaign starts in **preview**: a few accounts per owner are staged for review, and nothing sends until someone signs the campaign off.
 
 There is no model API bill. Model calls go through `claude` (Claude Pro or Max) or, if you opt in, an isolated `codex` runtime (a ChatGPT plan). Everything that can be done in plain code is done in plain code.
 
@@ -21,16 +24,18 @@ There is no model API bill. Model calls go through `claude` (Claude Pro or Max) 
 
 - [Quick start](#quick-start)
 - [How Franco works](#how-franco-works)
+- [Bring your own lists (CSV)](#bring-your-own-lists-csv)
 - [Approved-copy outreach](#approved-copy-outreach)
+- [Raad mode](#raad-mode)
 - [Generated outreach](#generated-outreach)
-- [Review, autopilot and the kill switch](#review-autopilot-and-the-kill-switch)
+- [Review, preview, autopilot and the kill switch](#review-preview-autopilot-and-the-kill-switch)
 - [Replies](#replies)
 - [The dashboard](#the-dashboard)
 - [Configuration](#configuration)
 - [Commands](#commands)
 - [Using a ChatGPT plan (Codex)](#using-a-chatgpt-plan-codex)
 - [Compliance and deliverability](#compliance-and-deliverability)
-- [Data](#data)
+- [Your data folder](#your-data-folder)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [License](#license)
@@ -76,10 +81,49 @@ The decision is made from counts in the database, not by asking a model. Profili
 | Agent | What it does |
 |---|---|
 | **Scout** | Scores and personalizes prospects. Searching, website reading and email resolution are plain Python. |
-| **Writer** | Drafts sequences with the model (generated mode), or renders approved copy with no model (approved-copy mode). |
+| **Writer** | Drafts sequences with the model (generated), renders approved copy with no model (approved copy), or places accounts in funnels and writes email 1 from the funnel's brief (raad). |
 | **Sender** | Stages each email in the outbox with a send time, then sends due, approved items with human-like pacing, the daily cap and the pre-send gate. |
 | **Handler** | Reads replies, removes quoted text, classifies intent, stops sequences, records opt-outs, detects bounces, and queues responses through the outbox. |
 | **Analyst** | On idle cycles, writes pipeline stats to `data/analytics.json`. |
+
+---
+
+## Bring your own lists (CSV)
+
+Every list Franco takes can come in as a CSV file. You don't have to use discovery or type entries one at a time. There are three kinds, each with a template:
+
+| Kind | One row is | Required columns | Used by |
+|---|---|---|---|
+| `accounts` | a researched account: one buyer, the campaign they get, and the sourced fact behind it | `company, domain, campaign, first_name, last_name, title, email, observation, source_url, source_date` | approved copy, raad |
+| `contacts` | a company, optionally with a person at it | `company, domain` | generated, raad |
+| `suppressions` | an email address or a whole domain never to contact | `value` (an address or a domain) | everything |
+
+Optional columns:
+- **accounts:** `owner, segment, hypothesis, score (0-10), email_status, linkedin_url`.
+- **contacts:** `first_name, last_name, title, email, email_status, linkedin_url, segment, location, phone, owner, notes`. In raad mode, also `campaign` (pin a funnel), plus `observation, source_url, source_date`.
+- **suppressions:** `reason`. A suppressions file with no header, one address or domain per line, also works.
+
+Common spreadsheet header names are accepted, for example `website` for domain, `role` for title and `funnel` for campaign.
+
+**From the terminal:**
+
+```bash
+franco import --template --kind contacts > contacts.csv   # start from the template
+franco import contacts.csv --kind contacts --dry-run      # check every row, write nothing
+franco import contacts.csv --kind contacts --verify       # import; verify unverified emails
+franco import accounts.csv                                # --kind defaults to accounts in approved-copy mode
+franco suppress import do_not_contact.csv                 # same as --kind suppressions
+franco suppress export > suppressions.csv
+```
+
+**From the dashboard:** the Contacts tab has an **Import CSV** panel. Pick the kind, download its template, then choose a file. The file is checked straight away, and nothing is written until you press **Import**. The browser reads the file and sends its text only to your local dashboard.
+
+Rules that apply to every import:
+- Every row is validated before anything is written, and rejected rows are reported with the reason.
+- Rows are refused if they are suppressed (the address or its domain), already in outreach, owned by someone else, or duplicated within the file.
+- `--verify` spends one verification credit per address that isn't already marked `verified`. Only verified addresses are emailed, unless `channels.email.send_to_risky` is on.
+- Re-importing a file is safe: companies and people are matched by domain and email, not duplicated.
+- An imported company with no person is profiled like a discovered one, and Franco finds and verifies people at it.
 
 ---
 
@@ -129,20 +173,16 @@ The only merge fields are `{{first_name}}`, `{{last_name}}`, `{{company}}`, `{{t
 Each row is one account, one buyer, the campaign they get, and the fact that justifies writing to them, with the page it came from and the date it was checked.
 
 ```bash
-franco import --template > accounts.csv   # header + example row
-franco import accounts.csv --dry-run      # validate every row, write nothing
+franco import --template --kind accounts > accounts.csv   # header + example row
+franco import accounts.csv --dry-run                      # validate every row, write nothing
 franco import accounts.csv --verify --owner Hemin
 ```
 
-Required columns: `company, domain, campaign, first_name, last_name, title, email, observation, source_url, source_date`. Optional columns: `owner, segment, hypothesis, score (0-10), email_status, linkedin_url`. Common spreadsheet header names are accepted as aliases.
-
-A row is rejected if it:
+The columns are in [Bring your own lists](#bring-your-own-lists-csv), and the dashboard's Import CSV panel does the same thing. Besides the general import rules, an account row is also rejected if it:
 - is missing a field;
 - names a campaign that isn't configured;
 - has a bad email, a source that isn't a link, or a future date;
-- is on the suppression list;
-- belongs to a different owner;
-- is for someone who is already in outreach.
+- has an observation too short to be a specific, checkable fact.
 
 The observation is stored as the account's `TRIGGER_OBSERVATION`, together with its source and date.
 
@@ -153,13 +193,83 @@ On the next cycle, the writer stages the full sequence for one contact per accou
 - no one else at the company is already in outreach;
 - the observation is within `observation_max_age_days`.
 
-Every step waits in the outbox for review, unless autopilot is on.
+The first accounts of every campaign are a **preview**. Nothing sends until the campaign is signed off; see [Review, preview, autopilot and the kill switch](#review-preview-autopilot-and-the-kill-switch). After sign-off, every step waits in the outbox for review, unless autopilot is on.
 
 - **Every** email, replies included, is checked by the pre-send gate for blocked claims.
 - **Cold** emails must also carry the footer, and they get List-Unsubscribe headers.
 - **No** cold email is sent while the postal address is blank.
 
 `franco outbox` lists each draft with the reason for writing: the campaign, the observation, its source and the date it was checked. `franco outbox --edit <id>` opens a draft in `$EDITOR`.
+
+---
+
+## Raad mode
+
+Named after Raad Mobrem, CEO of [Intro](https://intro.co), whose way of finding customers and personalizing outbound this mode follows:
+
+1. **At most three customer benefits.** Every message connects to one of them and never works against another.
+2. **Narrow, observable funnels instead of one broad message.** Zapier writing to a shop that runs Shopify *and* QuickBooks about exactly that connection lands far better than "we connect your apps". Split the market by what you can actually see: marketplace vs feed first, then edge cases like "already runs AdSense" vs "no ads at all".
+3. **A tiny story the whole funnel recognises.** "Every marketplace reaches a size where sellers will pay for better placement…", then how you handle it, kept to what is true today.
+4. **The pitch shifts with the buyer.** A CEO and a head of product care about different consequences of the same thing.
+5. **One page per funnel.** The email lands on a page that restates the same narrow case.
+
+### Configure it
+
+```yaml
+outreach:
+  mode: raad
+  benefits:                     # at most three; every funnel names one
+    - { key: revenue, text: "A measurable revenue opportunity from intent already on the platform" }
+    - { key: control, text: "Discovery and commercial rules stay under your product control" }
+  first_email_max_words: 110
+  funnels:                      # tried in order: put the narrowest first
+    MKT_3P_ADS:
+      name: "Marketplace already selling third-party ads"
+      benefit: control
+      match:
+        require: ["segment=marketplace", "TECH_STACK=AdSense|Ad Manager|Prebid"]
+      story: "A marketplace that monetises with third-party ad slots hands its best positions to a network that knows nothing about its sellers."
+      solution: "We help a marketplace offer sponsored listings from its own sellers on one surface, under rules the product team sets."
+      landing_url: "https://example.com/marketplaces"
+      personas:                 # regex on the contact's title → the angle to lean on
+        - { match: "\\b(ceo|founder)\\b", angle: "a revenue line from seller demand you already have" }
+        - { match: "product|search",      angle: "control over eligibility, placement and guardrails" }
+      steps:                    # approved follow-ups, by business day
+        - { day: 5, subject: "...", body: "Hi {{first_name}}, ..." }
+        - { day: 9, subject: "...", body: "..." }
+    MKT:
+      name: "Marketplace, no sponsored placement yet"
+      benefit: revenue
+      match: { require: ["segment=marketplace"] }
+      story: "Every marketplace reaches a size where some sellers will pay for better placement..."
+      solution: "..."
+```
+
+Match conditions can use:
+- **A signal code:** `RUNNING_GOOGLE_ADS` holds when the account carries that signal.
+- **A signal value:** `TECH_STACK=AdSense` holds when the value contains the text. `a|b` means either one.
+- **An account field:** lowercase `segment`, `industry`, `location`, `company_size`, `description`, `hypothesis` or `owner`, again with `field=text`.
+
+`exclude` takes the same conditions. An account imported with a `campaign` (funnel) column keeps that funnel; the researcher's call beats inference. The profiler detects publisher ad tags (Google AdSense, Ad Manager, Prebid, Amazon Publisher Services), so "already sells ad space" is something Franco can observe.
+
+### What it does each cycle
+
+1. **Find.** It places each new, verified contact's company in the first funnel whose conditions hold. Companies that match nothing are left alone.
+2. **Check there's something to say.** It writes only when it can cite something specific and sourced: a researched `TRIGGER_OBSERVATION` (within `observation_max_age_days`) or the observed signal that put the account in the funnel.
+3. **Write email 1.** The model gets the funnel's story, the account's facts with their sources, the funnel's solution, exactly one benefit, the role angle for the buyer's title, the word limit and the blocked-claims list. It may not claim anything that isn't in that text. A draft that contains a blocked claim is thrown away.
+4. **Queue follow-ups.** It adds the funnel's approved steps, rendered with merge fields and scheduled in business days.
+5. **Apply the usual rules.** Preview and sign-off (per funnel), the footer, the gate, suppression, the account stop and autopilot all apply as in the other modes.
+
+See how your companies split across funnels, and why any one landed where it did:
+
+```bash
+franco funnels                          # benefits, each funnel's conditions, companies and reachable contacts
+franco funnels --company market.example # which funnel, which conditions held, which facts
+```
+
+The dashboard's Campaigns tab shows the same table.
+
+Plain contact lists work well with this mode. Import companies with a `segment` (and, when you have them, an observation and its source). Franco profiles their sites, places them, and writes from what it finds.
 
 ---
 
@@ -179,7 +289,7 @@ franco signals --confirm SERP_RANK # a paid one, explicitly
 
 The cohort builder on the dashboard's Signals tab turns confirmed signals into a target list. You choose what a prospect must have and what disqualifies it, and it counts the matches as you go.
 
-**3. Discover.** Discovery is the only stage that spends money, so it always estimates first:
+**3. Discover, or bring a list.** Already have the companies? Import them as a CSV (`franco import companies.csv --kind contacts`) and skip discovery. Otherwise, discovery is the only stage that spends money, so it always estimates first:
 
 ```bash
 franco discover --providers        # the menu, with real prices
@@ -202,7 +312,7 @@ franco discover --provider dataforseo_listings --max-spend 2.00
 
 ---
 
-## Review, autopilot and the kill switch
+## Review, preview, autopilot and the kill switch
 
 By default **every outgoing email waits in the outbox for your approval.** That includes replies.
 
@@ -211,7 +321,28 @@ franco outbox                   # review in the terminal (with the reason for ea
 franco outbox --approve <id>    # or --approve-all, --reject <id>, --edit <id>
 ```
 
-On the dashboard, the Outbox is a decisions desk. One email fills the pane and you work the queue with `A` (approve), `R` (reject) and `J`/`K` (move).
+On the dashboard, the Outbox is a decisions desk. One email fills the pane, with a strip above it showing why the email exists:
+- the campaign or funnel, the owner, the buyer and the account;
+- the observation, a link to its source and the date it was checked.
+
+You work the queue with `A` (approve), `R` (reject), `E` (edit the draft in place) and `J`/`K` (move).
+
+**Preview and sign-off.** Every approved-copy campaign and raad funnel starts in preview, set by `outreach.preview_accounts` (default 10, 0 to turn it off):
+- **Small batch.** Only the first 10 accounts per owner are staged.
+- **Always reviewed.** They wait for review even with autopilot on.
+- **Nothing sends** until a person signs the campaign off.
+
+Signing off releases the preview for normal approval and lets the rest of the campaign's accounts stage on the next cycle.
+
+```bash
+franco preview                        # every campaign's state, and each preview account:
+                                      # buyer, role, campaign, observation + source, exact first email
+franco preview M1 --csv preview.csv   # the same as a spreadsheet, to send to whoever signs off
+franco preview signoff M1 --by "Hemin"
+franco preview reopen M1              # back to preview: nothing more sends
+```
+
+On the dashboard, each campaign in preview gets a card in the Outbox with a **Download preview CSV** button and a **Sign off** button.
 
 **Autopilot** turns review off without editing config or restarting:
 
@@ -254,15 +385,16 @@ The handler polls the mailbox every cycle.
 - **Opt-outs** ("no thanks", "unsubscribe", "stop", and so on, in the body or the subject) add the address to the suppression list. If `send_opt_out_ack` is set, Franco sends a one-line acknowledgement after the suppression is recorded.
 - **"Later"** pauses the contact and records when to get back in touch.
 - **Bounces** mark the address invalid and cancel its queued sends. If the bounce rate passes `max_bounce_rate`, Franco trips the kill switch.
-- **Other intents** get a drafted response, which goes through the outbox like everything else. `outreach.reply_templates` gives the handler approved wording to adapt for each intent.
+- **Not interested** closes the conversation. If `outreach.reply_templates.not_interested` is set, Franco sends that text once, as written, with no model involved.
+- **Other intents** get a drafted response, which goes through the outbox like everything else. `outreach.reply_templates` gives the handler approved wording to adapt for each intent: `interested`, `question`, `wrong_person` and `later`.
 
-The suppression list is shared by every campaign:
+The suppression list is shared by every campaign and mode. A domain entry blocks everyone at that domain.
 
 ```bash
 franco suppress list
 franco suppress add jane@acme.com acme.com --reason "asked to stop"
-franco suppress import do_not_contact.csv
-franco suppress export > suppressions.csv
+franco suppress import do_not_contact.csv     # CSV with value[,reason], or one address per line
+franco suppress export > suppressions.csv     # CSV: value, kind, reason, source, created_at
 ```
 
 ---
@@ -274,8 +406,10 @@ franco suppress export > suppressions.csv
 - **Today**: anything waiting on a decision, then the pipeline
 - **Signals**: the confirmation gate and the cohort builder
 - **Discover**: providers and prices side by side, an estimate, then a run
-- **Companies / Contacts**: everything found, with CSV export
-- **Campaigns, Outbox, Conversations, Activity**
+- **Companies / Contacts**: everything found or imported, with CSV import (accounts, contacts, suppressions) and CSV export
+- **Campaigns**: sequences, plus the funnel table in raad mode
+- **Outbox**: the decisions desk, preview cards with sign-off, autopilot and the kill switch
+- **Conversations, Activity**
 - **Usage**: quota gauges and token counts for each agent
 - **Settings**
 
@@ -295,8 +429,9 @@ channels:
   email:     { provider: gmail | smtp | instantly, max_daily_sends, require_approval,
                send_to_risky, max_bounce_rate }
   linkedin:  { enabled }
-outreach:    { mode: generated | templates, campaigns, timezone, send_hour,
-               observation_max_age_days, reply_templates }
+outreach:    { mode: generated | templates | raad, campaigns, benefits, funnels,
+               timezone, send_hour, observation_max_age_days, preview_accounts,
+               first_email_max_words, reply_templates }
 compliance:  { require_footer, postal_address, footer, unsubscribe_url,
                blocked_claims, send_opt_out_ack, opt_out_ack }
 usage:       { max_daily_claude_percent, heartbeat_interval_minutes, quiet_hours }
@@ -317,13 +452,15 @@ franco train <url>              # learn a product from its website
 franco status [--check]         # pipeline summary / provider health check
 franco usage                    # quota + per-agent tokens
 
-franco import FILE              # researched accounts for approved copy (--dry-run, --verify, --template)
+franco import FILE              # a CSV list: --kind accounts|contacts|suppressions (--dry-run, --verify, --template)
 franco signals                  # review/confirm signals
 franco discover                 # find businesses (--providers, --estimate, --provider, --max-spend)
 franco profile                  # read discovered sites (free)
 franco export [--all]           # prospects → CSV
 
+franco funnels [--company D]    # raad mode: how companies split across funnels
 franco outbox                   # review queue (--approve, --approve-all, --reject, --edit)
+franco preview [KEY]            # a campaign's preview (--csv FILE); preview signoff|reopen KEY
 franco autopilot on|off|default # send without review
 franco sending pause|resume     # kill switch
 franco suppress list|add|remove|import|export
@@ -360,7 +497,7 @@ How it works:
 
 Franco automates outreach, but **you are the sender.**
 
-- **CAN-SPAM.** Every email needs a truthful subject, an accurate from address, a working opt-out that is honored quickly, and a physical postal address. Approved-copy mode enforces the footer and the opt-out in code. Generated mode relies on its copywriting rules, so set `require_footer` there too.
+- **CAN-SPAM.** Every email needs a truthful subject, an accurate from address, a working opt-out that is honored quickly, and a physical postal address. In every mode, Franco adds the footer to cold email and the gate refuses cold email without it. The template `franco.yaml` ships with `require_footer: true` and a blank address, so **no cold email sends until you enter your own postal address**.
 - **GDPR / PECR.** B2B email needs a legitimate interest you can defend: the message is relevant to the person's role, you know where the data came from, and objecting is easy. Imported accounts carry the source of their observation for exactly this reason.
 - **Honesty.** If someone asks whether they are talking to an automated system, Franco says yes.
 - **LinkedIn.** Automating LinkedIn violates its terms of service. LinkedIn is off by default.
@@ -375,13 +512,42 @@ Franco automates outreach, but **you are the sender.**
 
 ---
 
-## Data
+## Your data folder
 
-Everything stays local, in SQLite at `data/franco.db`.
+Everything Franco knows and does lives in `data/`, next to the code, on your machine. It is created on first run and is **gitignored**. Never commit it, never put it in a shared drive, and never attach it to an issue.
 
-Each fact Franco learns is a row in `observations` rather than a column. Each row carries the signal code, the value, a confidence, an evidence URL and a timestamp. That means a new signal needs no migration, re-observing builds a history automatically, and a cohort is a SQL query. A database trigger rejects any signal code that isn't in the governed `signal_codes` table.
+| File | What it holds | Sensitive? |
+|---|---|---|
+| `franco.db` | The SQLite database: every company, person, email address, observation, email sent, reply, suppression, setting and decision | **Yes: personal data** about the people you contact |
+| `gmail_token.json` | The Gmail OAuth refresh token from `franco gmail auth` | **Yes: treat it like a password**; it can send as you |
+| `franco.log` | The heartbeat log when Franco is started from the dashboard | Somewhat: email addresses appear in it |
+| `franco.pid` | The process id of a dashboard-started `franco run` | No |
+| `analytics.json` | The analyst's latest pipeline report | Somewhat |
 
-Other tables include `companies`, `prospects`, `campaigns`, `outbox`, `conversations`, `suppressions`, `actions`, `runs`, `usage_events` and `settings`. Autopilot and the kill switch are stored in `settings`.
+Your credentials are in `.env` and your sending config is in `franco.local.yaml`. Both are next to `data/`, and both are gitignored for the same reason.
+
+### Using it
+
+- **Look inside.** `sqlite3 data/franco.db`, or any SQLite browser. Useful tables:
+  - `companies`, `prospects`, `observations` (every fact with its source);
+  - `outbox` (every email, with status and send time) and `conversations`;
+  - `suppressions`, `campaigns`, `actions` (every decision Franco made);
+  - `settings` (autopilot, the kill switch, sign-offs).
+- **Get lists out** without SQL: `franco export` (deliverable contacts as CSV), `franco export --all`, `franco suppress export`, `franco preview --csv`, or the export buttons on the dashboard.
+- **Back it up** while Franco is running, safely: `sqlite3 data/franco.db ".backup data/backup-$(date +%F).db"`. Copying the file mid-write can give you a corrupt copy.
+- **Move to another machine.** Stop Franco, then copy `data/`, `.env` and `franco.local.yaml`. Run `franco gmail auth` again if the token doesn't carry over.
+- **Start fresh.** Stop Franco and move `data/franco.db` aside. The next run creates an empty database. Export the suppression list first and re-import it, so that people who opted out stay opted out.
+- **Someone asks what you hold about them, or to be deleted.** Look them up in `prospects` and `outbox` by email. To delete them, remove their rows from `prospects`, `outbox` and `conversations`, and **keep** (or add) their address in `suppressions` so they're never contacted again.
+- **Docker** mounts `./data` into the container (see `docker-compose.yml`), so the same folder is used either way.
+
+### How it's organised
+
+Each fact Franco learns is a row in `observations`, not a column. A row carries the signal code, the value, a confidence, an evidence URL and a timestamp. As a result:
+- a new signal needs no migration;
+- re-observing an account builds a history automatically;
+- a cohort or a funnel is a query.
+
+A database trigger rejects any signal code that isn't in the governed `signal_codes` table. The schema migrates itself forward on startup.
 
 ---
 
@@ -392,6 +558,8 @@ Other tables include `companies`, `prospects`, `campaigns`, `outbox`, `conversat
 - **`ModuleNotFoundError: franco` on macOS 3.13**: run `franco install` again; it relinks the package.
 - **Claude calls fail**: run `claude login` and check with `claude -p "say hi"`.
 - **Nothing is staged in approved-copy mode**: run `franco import --dry-run` and check the campaign key, the email status (it must be verified), the observation's age, and whether someone else at the company is already in outreach. The heartbeat log names the reason for each skipped account.
+- **Staged, but nothing sends**: the campaign is probably still in preview. Run `franco preview`, then `franco preview signoff KEY --by NAME`.
+- **Raad mode writes nothing**: run `franco funnels`. Companies may match no funnel, may have no verified contact, or Franco may have nothing sourced to cite. `franco funnels --company DOMAIN` shows what it knows about one company.
 - **Cold email held**: `compliance.postal_address` is blank while `require_footer` is on.
 - **Nothing sends**: check `franco sending`, quiet hours, the daily cap and `franco gmail test`.
 - **Emails land in spam**: almost always a domain problem, not the copy. Check SPF, DKIM and DMARC, warmup and volume.
@@ -413,7 +581,8 @@ franco/
 ├── codex.py           # isolated Codex runtime
 ├── state.py           # SQLite schema + migrations, observations, outbox, suppression, settings
 ├── outreach.py        # rendering, footer, business days, quoted-text stripping
-├── importer.py        # researched-account CSV import
+├── importer.py        # CSV lists: accounts, contacts, suppressions
+├── funnels.py         # raad mode: funnel placement and the funnel report
 ├── gate.py            # deterministic pre-send checks
 ├── signals.py         # the signal catalog
 ├── dashboard.py       # FastAPI JSON API

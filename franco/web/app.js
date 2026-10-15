@@ -2,7 +2,7 @@ let currentTab = 'today';
 let companyDrill = false;      // true while viewing a single company's contacts
 let _companies = [], _prospects = [], _campaigns = [];
 let _signals = null;           // last /api/signals payload, for the cohort builder
-let _desk = { items: [], i: 0 };
+let _desk = { items: [], i: 0, editing: false };
 
 // ── Appearance ──
 //
@@ -1089,6 +1089,7 @@ async function loadOutbox() {
         '<p style="color:var(--text-2);font-size:13px">' + escHtml(data.paused) +
         '. Approved mail stays queued until you resume.</p></div>'
     : '') +
+    renderPreviews(data.previews || []) +
     (auto.on
       ? '<div class="card" style="margin-bottom:16px">' +
           '<h2>&#9889; Autopilot is on</h2>' +
@@ -1144,21 +1145,70 @@ function renderDesk(items, i) {
       '<div class="to-line">To <b>' + escHtml(cur.to_email) + '</b> &middot; step ' +
         cur.step + ' (' + escHtml(cur.kind) + ') &middot; sends ' +
         formatDate(cur.send_at) + '</div>' +
-      '<div class="subject">' + escHtml(cur.subject || '(no subject)') + '</div>' +
-      '<div class="body">' + escHtml(cur.body) + '</div>' +
+      deskWhy(cur) +
+      (_desk.editing
+        ? '<input id="desk-edit-subject" class="desk-edit-subject" value="' + escHtml(cur.subject || '') + '">' +
+          '<textarea id="desk-edit-body" class="desk-edit-body" rows="14">' + escHtml(cur.body) + '</textarea>'
+        : '<div class="subject">' + escHtml(cur.subject || '(no subject)') + '</div>' +
+          '<div class="body">' + escHtml(cur.body) + '</div>') +
       '<div class="desk-actions">' +
-        '<button class="btn btn-primary" onclick="outboxAct(\'' + cur.id + '\',\'approve\')">' +
-          'Approve <kbd>A</kbd></button>' +
-        '<button class="btn btn-secondary" onclick="outboxAct(\'' + cur.id + '\',\'reject\')">' +
-          'Reject <kbd>R</kbd></button>' +
+      (_desk.editing
+        ? '<button class="btn btn-primary" onclick="deskSave(\'' + cur.id + '\')">Save changes</button>' +
+          '<button class="btn btn-secondary" onclick="deskEdit(false)">Cancel</button>'
+        : '<button class="btn btn-primary" onclick="outboxAct(\'' + cur.id + '\',\'approve\')">' +
+            'Approve <kbd>A</kbd></button>' +
+          '<button class="btn btn-secondary" onclick="outboxAct(\'' + cur.id + '\',\'reject\')">' +
+            'Reject <kbd>R</kbd></button>' +
+          '<button class="btn btn-secondary" onclick="deskEdit(true)">Edit <kbd>E</kbd></button>') +
         '<span class="muted" style="font-size:12px;margin-left:auto">' +
           (i + 1) + ' of ' + items.length + '</span>' +
       '</div>' +
     '</div></div>';
 }
 
+// Why this email exists: the account, its owner and campaign, the buyer,
+// and the sourced observation behind it, so a reviewer can check the claim
+// against the page it came from before approving.
+function deskWhy(cur) {
+  const c = cur.context || {};
+  const bits = [];
+  if (cur.preview) bits.push('<span class="badge t-waiting">Preview &middot; held until ' + escHtml(c.campaign || 'the campaign') + ' is signed off</span>');
+  if (c.campaign) bits.push('<span><b>' + escHtml(c.campaign) + '</b></span>');
+  if (c.owner) bits.push('<span>owner ' + escHtml(c.owner) + '</span>');
+  if (c.name || c.title) bits.push('<span>' + escHtml([c.name, c.title].filter(Boolean).join(', ')) + '</span>');
+  if (c.company) bits.push('<span>' + escHtml(c.company) + (c.domain ? ' (' + escHtml(c.domain) + ')' : '') + '</span>');
+  if (c.score !== null && c.score !== undefined && c.score !== '') bits.push('<span>score ' + escHtml(c.score) + '/10</span>');
+  let obs = '';
+  if (c.observation) {
+    const src = safeUrl(c.source_url);
+    obs = '<div class="why-obs">Observed: ' + escHtml(c.observation) +
+      (src ? ' &middot; <a href="' + escHtml(src) + '" target="_blank" rel="noopener">source</a>' : '') +
+      (c.checked ? ' &middot; checked ' + escHtml(c.checked) : '') + '</div>';
+  }
+  if (!bits.length && !obs) return '';
+  return '<div class="desk-why"><div class="why-meta">' + bits.join('') + '</div>' + obs + '</div>';
+}
+
+function deskEdit(on) {
+  _desk.editing = !!on;
+  document.getElementById('outbox-desk').innerHTML = renderDesk(_desk.items, _desk.i);
+  if (on) { const b = document.getElementById('desk-edit-body'); if (b) b.focus(); }
+}
+
+async function deskSave(id) {
+  const subject = document.getElementById('desk-edit-subject').value;
+  const body = document.getElementById('desk-edit-body').value;
+  const data = await api('/api/outbox/' + encodeURIComponent(id) + '/edit', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({subject, body}),
+  });
+  if (data && data.success) { _desk.editing = false; showToast('Draft updated.', 'success'); loadOutbox(); }
+  else showToast('Could not save: only drafts awaiting review can be edited.', 'error');
+}
+
 function deskGo(n) {
   if (n < 0 || n >= _desk.items.length) return;
+  _desk.editing = false;
   _desk.i = n;
   document.getElementById('outbox-desk').innerHTML = renderDesk(_desk.items, n);
 }
@@ -1174,6 +1224,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'k') { e.preventDefault(); deskGo(_desk.i - 1); }
   else if (k === 'a' && cur) { e.preventDefault(); outboxAct(cur.id, 'approve'); }
   else if (k === 'r' && cur) { e.preventDefault(); outboxAct(cur.id, 'reject'); }
+  else if (k === 'e' && cur && !_desk.editing) { e.preventDefault(); deskEdit(true); }
 });
 
 async function outboxAct(id, action) {
@@ -1187,6 +1238,41 @@ async function outboxApproveAll() {
   const data = await api('/api/outbox/approve-all', {method: 'POST'});
   if (data && data.success) showToast('Approved ' + data.approved + ' email(s).', 'success');
   else showToast('Approve-all failed.', 'error');
+  loadOutbox();
+}
+
+// Approved-copy campaigns start in preview: a few accounts per owner are
+// staged for review and nothing sends until someone signs the campaign off.
+function renderPreviews(previews) {
+  // Only campaigns with accounts actually waiting in preview get a card.
+  const open = previews.filter(p => !p.signed_off && Object.values(p.staged || {}).some(n => n > 0));
+  if (!open.length) return '';
+  return open.map(p => {
+    const staged = Object.entries(p.staged || {});
+    const total = staged.reduce((a, [, n]) => a + n, 0);
+    const owners = staged.map(([o, n]) => escHtml(o || 'no owner') + ': ' + n).join(', ') || 'nothing staged yet';
+    return '<div class="card" style="margin-bottom:16px">' +
+      '<h2>' + escHtml(p.key) + ' is in preview</h2>' +
+      '<p style="color:var(--text-2);font-size:13px">' + escHtml(p.name) + '. Up to ' + p.preview_size +
+        ' accounts per owner are staged for review and <b>nothing sends</b> until the campaign is signed off. ' +
+        'Staged so far: ' + owners + '.</p>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">' +
+        '<a class="btn btn-secondary btn-sm" href="/api/preview.csv?campaign=' + encodeURIComponent(p.key) + '" download>Download preview CSV</a>' +
+        '<input id="signoff-by-' + escHtml(p.key) + '" class="form-input input-sm" placeholder="Signed off by" style="max-width:180px">' +
+        '<button class="btn btn-primary btn-sm" ' + (total ? '' : 'disabled ') +
+          'onclick="previewSignoff(\'' + escHtml(p.key) + '\')">Sign off ' + escHtml(p.key) + '</button>' +
+      '</div></div>';
+  }).join('');
+}
+
+async function previewSignoff(key) {
+  const by = (document.getElementById('signoff-by-' + key) || {}).value || '';
+  if (!by.trim()) { showToast('Enter who is signing off.', 'error'); return; }
+  const data = await api('/api/preview/' + encodeURIComponent(key) + '/signoff', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({by}),
+  });
+  if (data && data.success) showToast(key + ' signed off. Its emails can now send once approved.', 'success');
+  else showToast('Sign-off failed.', 'error');
   loadOutbox();
 }
 
@@ -1205,6 +1291,80 @@ async function sendingToggle(action) {
   if (data && data.success) showToast(action === 'pause' ? 'Sending paused.' : 'Sending resumed.', 'success');
   else showToast('Failed.', 'error');
   loadOutbox();
+}
+
+// ── Bring your own lists (CSV) ──
+// The file is read in the browser and its text sent to this local
+// dashboard, checked first (a dry run), then imported on a second click.
+
+const IMPORT_KINDS = {
+  accounts: 'Researched accounts (approved copy): one buyer, campaign and sourced observation per row',
+  contacts: 'Companies, optionally with a person at each: Franco profiles them and finds people',
+  suppressions: 'Emails or domains never to contact',
+};
+let _import = { text: '', name: '', checked: false, kind: 'contacts', owner: '' };
+
+function renderImportPanel() {
+  const el = document.getElementById('import-panel');
+  if (!el) return;
+  const kind = _import.kind;
+  el.innerHTML = '<div class="card" style="margin-bottom:16px">' +
+    '<h2>Import a CSV list</h2>' +
+    '<p style="color:var(--text-2);font-size:13px">Every row is checked before anything is written. ' +
+      'Start from a template so the columns match.</p>' +
+    '<div class="import-row">' +
+      '<select id="import-kind" class="form-input input-sm" onchange="_import.kind=this.value;_import.checked=false;renderImportPanel()">' +
+        Object.keys(IMPORT_KINDS).map(k => '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + k + '</option>').join('') +
+      '</select>' +
+      '<a class="btn btn-secondary btn-sm" href="/api/import/template/' + kind + '" download>Template</a>' +
+      '<input type="file" id="import-file" accept=".csv,text/csv" onchange="importPick(this)">' +
+      (kind !== 'suppressions' ? '<input id="import-owner" class="form-input input-sm" placeholder="Owner (optional)" style="max-width:160px" value="' + escHtml(_import.owner) + '" oninput="_import.owner=this.value">' : '') +
+      '<button class="btn btn-secondary btn-sm" onclick="importRun(true)"' + (_import.text ? '' : ' disabled') + '>Check file</button>' +
+      '<button class="btn btn-primary btn-sm" onclick="importRun(false)"' + (_import.checked ? '' : ' disabled') + '>Import</button>' +
+    '</div>' +
+    '<p class="muted" style="font-size:12px;margin-top:8px">' + escHtml(IMPORT_KINDS[kind]) +
+      (_import.name ? ' &middot; file: ' + escHtml(_import.name) : '') +
+      (kind === 'suppressions' ? ' &middot; <a href="/api/suppressions.csv" download>export current list</a>' : '') + '</p>' +
+    '<div id="import-report"></div></div>';
+}
+
+function toggleImport() {
+  const el = document.getElementById('import-panel');
+  if (el.innerHTML) { el.innerHTML = ''; return; }
+  renderImportPanel();
+}
+
+function importPick(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    Object.assign(_import, { text: String(reader.result || ''), name: f.name, checked: false });
+    renderImportPanel();
+    importRun(true);
+  };
+  reader.readAsText(f);
+}
+
+async function importRun(dryRun) {
+  const kind = _import.kind, owner = _import.owner;
+  const r = await fetch('/api/import', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({kind, owner, csv: _import.text, dry_run: dryRun}),
+  }).then(x => x.json()).catch(() => null);
+  const out = document.getElementById('import-report');
+  if (!r || !r.success) { out.innerHTML = '<p style="color:var(--red)">' + escHtml((r && r.message) || 'Import failed.') + '</p>'; return; }
+  _import.checked = dryRun && r.imported.length > 0;
+  if (!dryRun) Object.assign(_import, { text: '', name: '', checked: false });
+  const lines = r.rejected.map(x => '<li>&#10007; row ' + x.row + ': ' + escHtml(x.why) + '</li>')
+    .concat(r.warnings.map(x => '<li>! row ' + x.row + ': ' + escHtml(x.why) + '</li>'));
+  const verb = dryRun ? 'would import' : 'imported';
+  renderImportPanel();
+  document.getElementById('import-report').innerHTML =
+    '<p style="margin-top:10px"><b>' + r.imported.length + '</b> ' + verb + ', <b>' + r.rejected.length + '</b> rejected' +
+    (dryRun && r.imported.length ? ' &mdash; press Import to write them.' : '.') + '</p>' +
+    (lines.length ? '<ul class="import-issues">' + lines.slice(0, 200).join('') + '</ul>' : '');
+  if (!dryRun) { showToast('Imported ' + r.imported.length + ' row(s).', 'success'); if (kind !== 'suppressions') loadProspects(); }
 }
 
 async function loadCompanies() {
@@ -1303,17 +1463,43 @@ async function loadProspects() {
   el.innerHTML = html + '</tbody></table></div>';
 }
 
+// Raad mode: every account sits in the narrowest funnel that fits it, and
+// every funnel lives in one of (at most) three customer benefits.
+function renderFunnels(f) {
+  if (!f || !f.funnels || !Object.keys(f.funnels).length) return '';
+  const benefits = (f.benefits || []).map(b =>
+    '<li><b>' + escHtml(b.key) + '</b>: ' + escHtml(b.text) + '</li>').join('');
+  const rows = Object.entries(f.funnels).map(([key, r]) =>
+    '<tr><td><b>' + escHtml(key) + '</b><div class="muted" style="font-size:12px">' + escHtml(r.name) + '</div></td>' +
+    '<td class="mono" style="font-size:12px">' + escHtml((r.require || []).join(' AND ') || 'anything') +
+      (r.exclude && r.exclude.length ? '<br>not ' + escHtml(r.exclude.join(', ')) : '') + '</td>' +
+    '<td>' + escHtml(r.benefit) + '</td>' +
+    '<td class="mono">' + r.companies + '</td><td class="mono">' + r.reachable + '</td>' +
+    '<td>' + (r.signed_off_by ? '<span class="badge t-good">signed off</span>' : '<span class="badge t-waiting">preview</span>') + '</td>' +
+    '<td>' + (safeUrl(r.landing_url) ? '<a href="' + escHtml(safeUrl(r.landing_url)) + '" target="_blank" rel="noopener">page</a>' : '') + '</td></tr>'
+  ).join('');
+  return '<div class="card" style="margin-bottom:16px"><h2>Funnels (raad mode)</h2>' +
+    (benefits ? '<ul style="font-size:13px;color:var(--text-2);margin:6px 0 12px 18px">' + benefits + '</ul>' : '') +
+    '<div class="table-card"><table><thead><tr><th>Funnel</th><th>Matches</th><th>Benefit</th>' +
+    '<th>Companies</th><th>Reachable</th><th>Status</th><th>Landing</th></tr></thead><tbody>' + rows +
+    '</tbody></table></div>' +
+    '<p class="muted" style="font-size:12px;margin-top:8px">' + f.unplaced + ' compan' + (f.unplaced === 1 ? 'y' : 'ies') +
+      ' match no funnel' + (f.unplaced_examples && f.unplaced_examples.length ? ' (e.g. ' + escHtml(f.unplaced_examples.join(', ')) + ')' : '') +
+      '. <code>franco funnels --company DOMAIN</code> explains any one.</p></div>';
+}
+
 async function loadCampaigns() {
   const el = document.getElementById('campaigns-list');
-  const data = await api('/api/campaigns');
+  const [data, funnels] = await Promise.all([api('/api/campaigns'), api('/api/funnels')]);
   if (!data) { el.innerHTML = offlineState(); return; }
   _campaigns = data;
+  const funnelHtml = renderFunnels(funnels);
   if (!data.length) {
-    el.innerHTML = emptyState('&#9993;', 'No campaigns yet',
+    el.innerHTML = funnelHtml + emptyState('&#9993;', 'No campaigns yet',
       'The Writer agent hasn\'t drafted any sequences. It kicks in automatically once Franco has scored prospects to write for.');
     return;
   }
-  let html = '';
+  let html = funnelHtml;
   data.forEach((c, i) => {
     let stepsHtml = '';
     for (const step of (c.sequence || [])) {

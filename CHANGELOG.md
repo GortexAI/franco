@@ -5,6 +5,59 @@ Notable changes to Franco. Dates are release dates; the format follows
 follow [semver](https://semver.org/), with the caveat that Franco is pre-1.0 and
 minor versions can still change behaviour.
 
+## [Unreleased]
+
+### Added
+
+- **Approved-copy outreach** (`outreach.mode: templates`):
+  - Signed-off sequences in `outreach.campaigns` are sent word for word to researched accounts, with no model involved.
+  - Merge fields are limited to `{{first_name}}`, `{{last_name}}`, `{{company}}`, `{{title}}`, `{{sender_name}}` and `{{verified_observation}}`. The observation is a sourced, dated fact recorded per account. An account with an unfilled field is skipped, never sent with a gap.
+  - Steps are scheduled in business days in `outreach.timezone`, and each follow-up is re-timed from the day the previous step actually went out.
+- **Raad mode** (`outreach.mode: raad`), named after Raad Mobrem, CEO of Intro, whose outbound approach it follows:
+  - Up to three `outreach.benefits`; every funnel names exactly one.
+  - `outreach.funnels` are narrow segments matched on observed signals (`TECH_STACK=AdSense|Prebid`) or account fields (`segment=marketplace`), tried narrowest first.
+  - Email 1 is written from the funnel's story, the account's sourced facts, the one benefit and a role-specific angle, then the funnel's approved follow-ups are queued.
+  - Drafts containing a blocked claim are discarded.
+  - `franco funnels` (and the dashboard's Campaigns tab) shows how companies split across funnels; `--company DOMAIN` explains one placement.
+  - The profiler now detects publisher ad tags (Google AdSense, Ad Manager, Prebid, Amazon Publisher Services).
+- **Bring your own lists as CSV files.** `franco import FILE --kind accounts|contacts|suppressions`:
+  - Each kind has a template (`--template`), header aliases, `--dry-run` and optional `--verify`.
+  - Every row is validated before anything is written.
+  - The dashboard's Contacts tab has the same Import CSV panel: check first, then import.
+  - `franco suppress import` now parses real CSV (with a `reason` column, or one address per line), and `export` quotes properly.
+- **Preview and sign-off.** New approved-copy campaigns and raad funnels start in preview (`outreach.preview_accounts`, default 10 per owner):
+  - Preview emails always wait for review, even on autopilot, and nothing sends until someone signs off.
+  - Commands: `franco preview [KEY] [--csv FILE]`, `franco preview signoff KEY --by NAME`, `franco preview reopen KEY`.
+  - The Outbox shows a sign-off card for each campaign in preview.
+- **Compliance in code:**
+  - `compliance.require_footer` puts the sender, company and postal address plus "Reply "no thanks" to stop." on every cold email in every mode. The gate refuses cold email without the footer, and nothing sends while the postal address is blank. The template ships with the footer on and the address blank.
+  - Cold email gets List-Unsubscribe headers (mailto, plus optional one-click HTTPS).
+  - `compliance.blocked_claims` is enforced on every email, replies included.
+  - A shared suppression list covers addresses and whole domains (`franco suppress`).
+- **Account-level outreach:**
+  - One contact per account in a sequence at a time, and one owner per account.
+  - A reply or opt-out from anyone stops queued email to everyone at that company.
+  - Follow-ups wait for the previous step, and are cancelled if it was rejected or failed.
+- **Replies:**
+  - Quoted history and Franco's own footer are removed before any rule runs.
+  - "no thanks" (body or subject) is an opt-out, and is suppressed before the optional acknowledgement is sent.
+  - Out-of-office replies no longer end a sequence.
+  - A new `later` intent pauses the contact and records when to get back in touch.
+  - `outreach.reply_templates` provides approved wording per intent; `not_interested` sends its template as written.
+- **Autopilot toggle.** `franco autopilot on|off|default` (and an Outbox button) overrides `channels.email.require_approval` at runtime; turning it on approves what is waiting. Every gate still applies.
+- **Outbox context and editing.** Each draft shows why it exists: campaign, owner, buyer, observation with its source and the date checked. Drafts can be edited before approval with `franco outbox --edit ID` or `E` on the dashboard.
+
+### Fixed
+
+- The dashboard now refuses cross-site requests and DNS-rebound hosts. Any web page could previously POST to `localhost:5555`, for example to turn on autopilot. Extra hostnames: `FRANCO_DASHBOARD_HOSTS`.
+- Scraped website and LinkedIn URLs are linked only when they are http(s).
+- CSV exports (prospects, preview, suppressions) neutralise cells that start with `=`, `+`, `-` or `@`, so scraped or imported text can't run as a spreadsheet formula.
+- Raad-mode drafts: facts are passed to the model as fenced, untrusted data, and code rejects any draft with a link other than the funnel's landing page, HTML, or a blocked claim.
+- New dashboard endpoints log errors instead of returning exception text.
+- When several steps of a sequence were overdue at once, they no longer all send in the same cycle.
+- Accounts staged on a weekend start on Monday, not Tuesday.
+- No empty campaign rows when every account in a batch is skipped.
+
 ## [0.3.0] — 2026-10-13
 
 ### Added

@@ -144,12 +144,14 @@
 <!-- Contacts -->
 <div id="prospects" class="section">
   <div class="section-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px">
-    <div><h2>Contacts</h2><p>People Franco has found and verified.</p></div>
+    <div><h2>Contacts</h2><p>People Franco has found and verified, or you imported.</p></div>
     <div style="display:flex;gap:8px;flex-shrink:0">
+      <button class="btn btn-secondary btn-sm" onclick="toggleImport()">Import CSV</button>
       <a class="btn btn-secondary btn-sm" href="/api/export/prospects.csv" download>Export deliverable CSV</a>
       <a class="btn btn-secondary btn-sm" href="/api/export/prospects.csv?all=true" download>Export all</a>
     </div>
   </div>
+  <div id="import-panel"></div>
   <div id="prospects-table"></div>
 </div>
 

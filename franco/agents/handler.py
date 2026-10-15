@@ -373,6 +373,15 @@ class Handler:
             await self.state.update_conversation(convo.id, status="closed", stage="closed_lost")
             await self.state.update_prospect_status(prospect.id, "lost")
             logger.info(f"Handler: {lead_email} not interested. Closing. One no is enough.")
+            # One closing reply, only if approved wording exists for it (no
+            # model involved), e.g. "That is useful context. ... we should pause."
+            closing = ((getattr(getattr(self.config, "outreach", None), "reply_templates", {})
+                        or {}).get("not_interested", "")).strip()
+            if closing and self.is_native:
+                sign = (self.config.persona.name or "").split(" ")[0]
+                await self._queue_native_reply(
+                    closing + (f"\n\n{sign}" if sign else ""), prospect, convo,
+                    reply_meta or {}, intent)
             return
 
         if intent == "later":

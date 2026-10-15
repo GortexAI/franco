@@ -430,6 +430,16 @@ td a:hover { text-decoration: underline; }
 }
 .desk-actions { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
 
+.desk-why { margin: 14px 0 4px; padding: 10px 12px; background: var(--panel-raised); border: 1px solid var(--border); border-radius: var(--r-md); font-size: 12.5px; color: var(--text-2); }
+.desk-why .why-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.desk-why .why-obs { margin-top: 6px; line-height: 1.5; }
+.desk-edit-subject { display: block; width: 100%; margin: 12px 0; padding: 8px 10px; font: inherit; font-size: 16px; background: var(--panel); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r-md); }
+.desk-edit-body { display: block; width: 100%; padding: 10px; font: inherit; font-size: 14px; line-height: 1.6; background: var(--panel); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r-md); resize: vertical; }
+.import-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.import-row input[type=file] { font-size: 12.5px; max-width: 100%; }
+.form-input.input-sm { padding: 6px 9px; font-size: 12.5px; width: auto; }
+.import-issues { margin: 8px 0 0 18px; font-size: 12.5px; color: var(--text-2); max-height: 220px; overflow: auto; }
+
 @media (max-width: 900px) { .desk { grid-template-columns: 1fr; } .desk-list { max-height: 220px; } }
 
 /* ── Discovery providers ─────────────────────────────────────── */
