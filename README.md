@@ -574,6 +574,23 @@ pytest -q                          # full suite
 python scripts/record_demo.py      # re-record docs/dashboard.gif (pip install -e ".[demo]")
 ```
 
+**Dependencies** live in three files that must agree (a test checks):
+
+| File | What it is |
+|---|---|
+| `pyproject.toml` | The version ranges `pip install -e .` accepts |
+| `requirements.in` | The same direct dependencies and ranges |
+| `requirements.txt` | **Generated.** Every package, including the ones those depend on, pinned to an exact version with hashes. Docker installs exactly this. |
+
+To change a dependency, edit `pyproject.toml` and `requirements.in`, then regenerate the lock:
+
+```bash
+uvx --python 3.11 --from pip-tools pip-compile --generate-hashes \
+    --allow-unsafe --strip-extras --output-file=requirements.txt requirements.in
+```
+
+The exact pins are what let GitHub's dependency graph see every installed package. Dependabot alerts and Dependabot security updates rely on them, and Renovate (`renovate.json`) recompiles the lock when it updates a dependency. Without a lock, Dependabot can't tell what's installed and won't open security fixes.
+
 ```
 franco/
 ├── main.py            # heartbeat loop

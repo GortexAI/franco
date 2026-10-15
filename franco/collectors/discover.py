@@ -33,6 +33,11 @@ from franco.models import Company
 
 logger = logging.getLogger("franco.collectors.discover")
 
+
+def _log_safe(value) -> str:
+    """One log line per event: a search term or error can't forge another."""
+    return str(value).replace("\r", " ").replace("\n", " ")
+
 TIMEOUT = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=10.0)
 
 
@@ -765,8 +770,8 @@ async def run_discovery(
                 except Exception as e:
                     # A failure is an observation about the run, not a reason
                     # to lose the queries that already succeeded.
-                    logger.warning("discover: %s failed on %r: %s",
-                                   provider_key, query.keyword(), e)
+                    logger.warning("discover: %s failed on %s: %s",
+                                   provider_key, _log_safe(query.keyword()), _log_safe(e))
                     report.errors.append(f"{query.keyword()}: {e}")
                     continue
 

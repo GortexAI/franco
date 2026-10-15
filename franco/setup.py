@@ -34,13 +34,26 @@ def _print_step(step: int, total: int, title: str):
     print(f"{'─'*60}")
 
 
-def _ask(prompt: str, default: str = "", required: bool = True, secret: bool = False) -> str:
-    """Ask the user a question. secret=True hides input (passwords, API keys)."""
-    suffix = f" [{default}]" if default else ""
-    reader = getpass.getpass if secret else input
+def _ask_secret(prompt: str) -> str:
+    """Ask for a password or API key with input hidden. The answer only ever
+    goes into .env; it is never printed or logged."""
     while True:
         try:
-            answer = reader(f"\n  → {prompt}{suffix}: ").strip()
+            answer = getpass.getpass(f"\n  → {prompt}: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\n  Setup cancelled.")
+            raise SystemExit(1)
+        if answer:
+            return answer
+        print("    (required — please enter a value)")
+
+
+def _ask(prompt: str, default: str = "", required: bool = True) -> str:
+    """Ask the user a question (visible input). Secrets use _ask_secret."""
+    suffix = f" [{default}]" if default else ""
+    while True:
+        try:
+            answer = input(f"\n  → {prompt}{suffix}: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n\n  Setup cancelled.")
             raise SystemExit(1)
@@ -298,7 +311,7 @@ class SetupWizard:
         has_instantly = _ask_yes_no("Do you have an Instantly account?")
 
         if has_instantly:
-            api_key = _ask("Instantly API key (from Settings → Integrations; input hidden)", secret=True)
+            api_key = _ask_secret("Instantly API key (from Settings → Integrations; input hidden)")
             self.env_vars["INSTANTLY_API_KEY"] = api_key
 
             # Test the key
@@ -331,7 +344,7 @@ class SetupWizard:
 
         if use_linkedin:
             email = _ask("LinkedIn email/username")
-            password = _ask("LinkedIn password (input hidden)", secret=True)
+            password = _ask_secret("LinkedIn password (input hidden)")
             self.env_vars["LINKEDIN_EMAIL"] = email
             self.env_vars["LINKEDIN_PASSWORD"] = password
 
@@ -354,7 +367,7 @@ class SetupWizard:
 
         if use_cloudflare:
             account_id = _ask("Cloudflare Account ID")
-            api_token = _ask("Cloudflare API Token (needs Browser Rendering - Edit permission; input hidden)", secret=True)
+            api_token = _ask_secret("Cloudflare API Token (needs Browser Rendering - Edit permission; input hidden)")
             self.env_vars["CLOUDFLARE_ACCOUNT_ID"] = account_id
             self.env_vars["CLOUDFLARE_API_TOKEN"] = api_token
             _print_franco("Nice. I'll use Cloudflare for deep crawling during training.")

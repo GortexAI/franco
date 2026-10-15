@@ -21,6 +21,13 @@ from fastapi.responses import (
 
 logger = logging.getLogger("franco.dashboard")
 
+
+def _failed(where: str, e: Exception) -> str:
+    """Log the details; return only a generic message for the browser
+    (exception text can carry paths, SQL or other internals)."""
+    logger.exception(f"Dashboard: {where} failed: {e}")
+    return f"{where} failed; see the dashboard log"
+
 from franco.paths import PROJECT_ROOT  # noqa: E402
 DB_PATH = PROJECT_ROOT / "data" / "franco.db"
 ENV_FILE = PROJECT_ROOT / ".env"
@@ -384,7 +391,7 @@ async def test_instantly(request: Request):
             else:
                 return {"success": False, "message": f"API returned {resp.status_code}. Check your key."}
     except Exception as e:
-        return {"success": False, "message": f"Connection failed: {str(e)}"}
+        return {"success": False, "message": _failed("Instantly connection test", e)}
 
 
 # ── Companies ──
@@ -500,7 +507,7 @@ async def start_franco():
             log_handle.close()
     except Exception as e:
         logger.warning("Failed to start Franco: %s", e)
-        return {"success": False, "message": f"Failed to start Franco: {e}"}
+        return {"success": False, "message": _failed("Starting Franco", e)}
     _franco_started_at = datetime.now()
 
     # Write PID file
@@ -607,7 +614,7 @@ async def get_stats():
             "brain_status": await _brain_status(),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": _failed("Get stats", e)}
 
 
 _USAGE_SUM = (
@@ -751,7 +758,7 @@ async def get_outbox_api():
                 "ORDER BY updated_at DESC LIMIT 25")),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": _failed("Get outbox api", e)}
 
 
 def _outreach_config():
@@ -953,7 +960,7 @@ async def outbox_approve_all():
         n = await state.approve_outbox()
         return {"success": True, "approved": n}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Outbox approve all", e)
 
 
 @app.post("/api/outbox/{item_id}/approve")
@@ -964,7 +971,7 @@ async def outbox_approve(item_id: str):
         n = await state.approve_outbox(item_id)
         return {"success": bool(n)}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Outbox approve", e)
 
 
 @app.post("/api/outbox/{item_id}/reject")
@@ -975,7 +982,7 @@ async def outbox_reject(item_id: str):
         await state.update_outbox_item(item_id, status="rejected")
         return {"success": True}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Outbox reject", e)
 
 
 def _config_requires_approval() -> bool:
@@ -998,9 +1005,7 @@ async def _autopilot_status(state) -> dict:
 
 def _server_error(where: str, e: Exception) -> JSONResponse:
     """Log the details; tell the browser only that it failed."""
-    logger.exception(f"Dashboard: {where} failed: {e}")
-    return JSONResponse({"success": False, "message": f"{where} failed; see the dashboard log"},
-                        status_code=500)
+    return JSONResponse({"success": False, "message": _failed(where, e)}, status_code=500)
 
 
 @app.post("/api/autopilot/{action}")
@@ -1034,7 +1039,7 @@ async def sending_toggle(action: str):
             await state.set_setting("bounce_count", "0")
         return {"success": True}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Sending toggle", e)
 
 
 @app.get("/api/export/prospects.csv")
@@ -1144,7 +1149,7 @@ async def get_discovery_providers():
         }
     except Exception as e:
         logger.exception("discovery providers failed")
-        return {"providers": [], "error": str(e)}
+        return {"providers": [], "error": _failed("Get discovery providers", e)}
 
 
 @app.post("/api/discover/estimate")
@@ -1169,7 +1174,7 @@ async def estimate_discovery(request: Request):
             "free": PROVIDERS[provider].estimate(queries) == 0,
         }
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": _failed("Estimate discovery", e)}, status_code=500)
 
 
 @app.post("/api/discover/run")
@@ -1226,7 +1231,7 @@ async def start_discovery(request: Request):
         _discovery_task = asyncio.create_task(_go())
         return {"success": True, "queries": len(queries)}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Go", e)
 
 
 @app.post("/api/profile/run")
@@ -1265,7 +1270,7 @@ async def start_profile():
         _discovery_task = asyncio.create_task(_go())
         return {"success": True, "pending": pending}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Go", e)
 
 
 @app.post("/api/discover/stop")
@@ -1277,7 +1282,7 @@ async def stop_discovery():
         await state.set_setting("discovery_paused", "stopped from dashboard")
         return {"success": True}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Stop discovery", e)
 
 
 @app.get("/api/today")
@@ -1402,7 +1407,7 @@ async def get_today():
         return {"items": items, "stats": stats}
     except Exception as e:
         logger.exception("today load failed")
-        return {"items": [], "stats": stats, "error": str(e)}
+        return {"items": [], "stats": stats, "error": _failed("Get today", e)}
 
 
 # ── Signals: Franco proposes, the user confirms ──
@@ -1480,7 +1485,7 @@ async def get_signals():
         return {"summary": summary, "groups": groups, "total": len(codes)}
     except Exception as e:
         logger.exception("signals load failed")
-        return {"error": str(e), "groups": [], "summary": {}}
+        return {"error": _failed("Get signals", e), "groups": [], "summary": {}}
 
 
 @app.post("/api/signals/status")
@@ -1519,7 +1524,7 @@ async def set_signals_status(request: Request):
             "status": status, "unknown": unknown,
         }
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Set signals status", e)
 
 
 @app.post("/api/cohort")
@@ -1551,7 +1556,7 @@ async def preview_cohort(request: Request):
         )
         return {"size": len(ids), "companies": rows}
     except Exception as e:
-        return JSONResponse({"size": 0, "companies": [], "error": str(e)}, status_code=500)
+        return JSONResponse({"size": 0, "companies": [], "error": _failed("Preview cohort", e)}, status_code=500)
 
 
 @app.get("/api/runs")
@@ -1563,7 +1568,7 @@ async def get_runs_api():
         await state.sweep_stale_runs()
         return await state.get_runs(limit=25)
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": _failed("Get runs api", e)}
 
 
 WEB_DIR = (Path(__file__).resolve().parent / "web")
@@ -1571,6 +1576,14 @@ WEB_DIR = (Path(__file__).resolve().parent / "web")
 
 TEXT_TYPES = {".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml"}
 BINARY_TYPES = {".woff2": "font/woff2", ".woff": "font/woff", ".png": "image/png"}
+
+
+def _web_assets() -> dict[str, Path]:
+    """Every servable file under web/, by its path relative to it."""
+    root = WEB_DIR.resolve()
+    kinds = TEXT_TYPES.keys() | BINARY_TYPES.keys()
+    return {f.relative_to(root).as_posix(): f for f in root.rglob("*")
+            if f.is_file() and f.suffix in kinds}
 
 
 @app.get("/static/{path:path}")
@@ -1582,9 +1595,10 @@ async def static_file(path: str):
     rather than fetched from a CDN — this is a local tool and it should work
     with the network off.
     """
-    target = (WEB_DIR / path).resolve()
-    root = WEB_DIR.resolve()
-    if not target.is_file() or not target.is_relative_to(root):
+    # Look the request up in the list of files that exist under web/, so a
+    # requested path is never handed to the filesystem.
+    target = _web_assets().get(path)
+    if target is None:
         return PlainTextResponse("not found", status_code=404)
 
     if target.suffix in BINARY_TYPES:

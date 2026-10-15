@@ -1,0 +1,22 @@
+# Direct dependencies with their allowed ranges. Must match
+# [project.dependencies] in pyproject.toml (tests/test_dependencies.py checks).
+#
+# requirements.txt is GENERATED from this file: every package, including the
+# ones these depend on, pinned to an exact version with hashes. Dependabot and
+# Renovate need those pins to know what is installed, so they can scan it and
+# raise security fixes. After changing this file, regenerate it:
+#
+#   uvx --python 3.11 --from pip-tools pip-compile --generate-hashes \
+#       --allow-unsafe --strip-extras --output-file=requirements.txt requirements.in
+pyyaml>=6.0.1,<7
+python-dotenv>=1.0.1,<2
+httpx>=0.27.0,<1
+playwright>=1.40,<2
+beautifulsoup4>=4.12.3,<5
+dnspython>=2.4.2,<3
+aiosmtplib>=5.1.3,<6
+aiosqlite>=0.19,<1
+pydantic>=2.5,<3
+pytz>=2024.1
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
