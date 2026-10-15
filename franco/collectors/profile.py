@@ -161,8 +161,8 @@ def _strip_code(html: str) -> str:
     Skipping this is how you end up with contacts named 'return value instan'
     whose title is CEO — minified JS read as prose.
     """
-    html = re.sub(r"(?is)<script\b.*?</script>", " ", html)
-    html = re.sub(r"(?is)<style\b.*?</style>", " ", html)
+    html = re.sub(r"(?is)<script\b.*?</script\b[^>]*>", " ", html)
+    html = re.sub(r"(?is)<style\b.*?</style\b[^>]*>", " ", html)
     html = re.sub(r"(?s)<!--.*?-->", " ", html)
     return html
 
