@@ -160,6 +160,23 @@ def compliance_problem(compliance) -> str:
     return ""
 
 
+# ── CSV export ──
+
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(value) -> str:
+    """A cell a spreadsheet won't execute. Observations, email bodies and
+    names come from imported files and scraped pages, so a value starting
+    with = + - @ is prefixed with ' (OWASP CSV injection guidance)."""
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(_FORMULA_START) else text
+
+
+def csv_safe_row(row: dict) -> dict:
+    return {k: csv_safe(v) for k, v in row.items()}
+
+
 # ── Preview ──
 
 PREVIEW_CSV_COLUMNS = (
@@ -171,7 +188,7 @@ PREVIEW_CSV_COLUMNS = (
 def preview_record(item: dict) -> dict:
     """One preview row: the fields a reviewer signs off on."""
     ctx = item.get("context") or {}
-    return {
+    return csv_safe_row({
         "campaign": item.get("campaign_key", ""), "owner": ctx.get("owner", ""),
         "company": ctx.get("company", ""), "domain": ctx.get("domain", ""),
         "buyer": ctx.get("name", ""), "title": ctx.get("title", ""),
@@ -179,4 +196,4 @@ def preview_record(item: dict) -> dict:
         "source_url": ctx.get("source_url", ""), "checked": ctx.get("checked", ""),
         "subject": item.get("subject", ""), "body": item.get("body", ""),
         "status": item.get("status", ""),
-    }
+    })

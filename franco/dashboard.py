@@ -820,7 +820,7 @@ async def outbox_edit(item_id: str, request: Request):
         await state.update_outbox_item(item_id, subject=subject, body=body)
         return {"success": True}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Draft edit", e)
 
 
 @app.post("/api/preview/{key}/{action}")
@@ -849,7 +849,7 @@ async def preview_signoff(key: str, action: str, request: Request):
             await state.set_signoff(key, by)
         return {"success": True}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Sign-off", e)
 
 
 @app.get("/api/funnels")
@@ -933,7 +933,7 @@ async def import_csv(request: Request):
                 "rejected": [{"row": n, "why": w} for n, w in report.rejected],
                 "warnings": [{"row": n, "why": w} for n, w in report.warnings]}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Import", e)
 
 
 @app.get("/api/suppressions.csv")
@@ -996,6 +996,13 @@ async def _autopilot_status(state) -> dict:
     }
 
 
+def _server_error(where: str, e: Exception) -> JSONResponse:
+    """Log the details; tell the browser only that it failed."""
+    logger.exception(f"Dashboard: {where} failed: {e}")
+    return JSONResponse({"success": False, "message": f"{where} failed; see the dashboard log"},
+                        status_code=500)
+
+
 @app.post("/api/autopilot/{action}")
 async def autopilot_toggle(action: str):
     """on: new drafts skip review and pending ones are approved now.
@@ -1010,7 +1017,7 @@ async def autopilot_toggle(action: str):
         return {"success": True, "approved": approved,
                 "autopilot": await _autopilot_status(state)}
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return _server_error("Autopilot toggle", e)
 
 
 @app.post("/api/sending/{action}")

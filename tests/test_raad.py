@@ -345,3 +345,38 @@ def test_dashboard_funnels_endpoint(monkeypatch):
             assert [b["key"] for b in data["benefits"]] == ["revenue", "control"]
             assert data["funnels"]["MKT_ADS"]["companies"] == 1
             assert json.dumps(data)   # serialisable end to end
+
+
+# ── hardening ──
+
+
+def test_raad_draft_rules_are_enforced_in_code():
+    from franco.agents.writer import raad_draft_problem
+    page = "https://example.com/marketplaces"
+    assert raad_draft_problem("s", f"More at {page}.", page, []) == ""
+    assert "link" in raad_draft_problem("s", "See http://evil.example/x", page, [])
+    assert "link" in raad_draft_problem("s", "visit www.other.example", page, [])
+    assert "link" in raad_draft_problem("s", f"More at {page}", "", [])   # no page: no links
+    assert "HTML" in raad_draft_problem("s", "<a href='x'>hi</a>", page, [])
+    assert "blocked" in raad_draft_problem("A guaranteed uplift", "b", page, ["guaranteed uplift"])
+
+
+@pytest.mark.asyncio
+async def test_injected_link_in_a_fact_never_reaches_the_outbox(state):
+    config = make_config()
+    await seed_account(state, "ads.example", tech="Google AdSense")
+    brain = FunnelBrain(body="Hi Dana,\n\nDetails at https://phish.example/login\n\nHemin")
+    await make_writer(state, config, brain).run()
+    assert await state.get_outbox() == []
+    assert "```facts" in brain.prompts[0] and "untrusted DATA" in brain.prompts[0]
+
+
+def test_csv_exports_neutralise_formulas():
+    from franco.importer import suppressions_csv
+    from franco.outreach import csv_safe, preview_record
+    assert csv_safe("=HYPERLINK(\"http://x\")").startswith("'=")
+    assert csv_safe("+1 555") == "'+1 555" and csv_safe("@SUM(1)") == "'@SUM(1)"
+    assert csv_safe("plain") == "plain" and csv_safe(None) == ""
+    row = preview_record({"to_email": "a@b.co", "body": "-2+3", "context": {"observation": "=cmd()"}})
+    assert row["body"] == "'-2+3" and row["observation"] == "'=cmd()"
+    assert "'=evil()" in suppressions_csv([{"value": "x@y.co", "reason": "=evil()"}])

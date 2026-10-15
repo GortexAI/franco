@@ -51,6 +51,9 @@ minor versions can still change behaviour.
 
 - The dashboard now refuses cross-site requests and DNS-rebound hosts. Any web page could previously POST to `localhost:5555`, for example to turn on autopilot. Extra hostnames: `FRANCO_DASHBOARD_HOSTS`.
 - Scraped website and LinkedIn URLs are linked only when they are http(s).
+- CSV exports (prospects, preview, suppressions) neutralise cells that start with `=`, `+`, `-` or `@`, so scraped or imported text can't run as a spreadsheet formula.
+- Raad-mode drafts: facts are passed to the model as fenced, untrusted data, and code rejects any draft with a link other than the funnel's landing page, HTML, or a blocked claim.
+- New dashboard endpoints log errors instead of returning exception text.
 - When several steps of a sequence were overdue at once, they no longer all send in the same cycle.
 - Accounts staged on a weekend start on Monday, not Tuesday.
 - No empty campaign rows when every account in a batch is skipped.

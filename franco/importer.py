@@ -27,7 +27,7 @@ from datetime import date, datetime
 
 from franco.models.company import Company
 from franco.models.prospect import Prospect
-from franco.outreach import TRIGGER_SIGNAL, clean_observation
+from franco.outreach import TRIGGER_SIGNAL, clean_observation, csv_safe
 from franco.signals import seed_signal_catalog
 
 REQUIRED = (
@@ -448,7 +448,7 @@ def suppressions_csv(rows: list[dict]) -> str:
     writer = csv.writer(out)
     writer.writerow(("value", "kind", "reason", "source", "created_at"))
     for row in rows:
-        writer.writerow([row.get(k) or "" for k in
+        writer.writerow([csv_safe(row.get(k) or "") for k in
                          ("value", "kind", "reason", "source", "created_at")])
     return out.getvalue()
 
