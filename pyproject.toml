@@ -9,7 +9,7 @@ description = "Autonomous AI sales agent. Always Be Closing."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "Hemin Joshi" }]
+authors = [{ name = "Gortex", email = "hello@gortex.ai" }]
 keywords = ["sales", "ai-agent", "cold-email", "prospecting", "autonomous-agent", "claude"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -34,6 +34,11 @@ dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.34,<1",
 ]
+
+[project.urls]
+Homepage = "https://gortex.ai"
+Repository = "https://github.com/GortexAI/franco"
+Issues = "https://github.com/GortexAI/franco/issues"
 
 [project.optional-dependencies]
 dev = [

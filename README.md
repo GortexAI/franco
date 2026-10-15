@@ -34,6 +34,7 @@ There is no model API bill. Model calls go through `claude` (Claude Pro or Max) 
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [License](#license)
+- [Contact](#contact)
 
 ---
 
@@ -45,7 +46,7 @@ There is no model API bill. Model calls go through `claude` (Claude Pro or Max) 
 - A mailbox to send from. Google Workspace is recommended.
 
 ```bash
-git clone <your-repo-url> franco && cd franco
+git clone https://github.com/GortexAI/franco.git && cd franco
 python3.13 -m venv .venv && source .venv/bin/activate && pip install -e .
 
 cp .env.example .env && $EDITOR .env   # mail provider + verifier keys, documented inline
@@ -432,4 +433,16 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Hemin Joshi. Franco is derived from an MIT-licensed project, and that project's copyright notice is kept in `LICENSE` as the license requires.
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Gortex. Franco is derived from an MIT-licensed project, and that project's copyright notice is kept in `LICENSE` as the license requires.
+
+---
+
+## Contact
+
+Franco is built and maintained by [Gortex](https://gortex.ai).
+
+Gortex · 440 N Wolfe Rd, Suite E133, Sunnyvale, CA 94085 · [hello@gortex.ai](mailto:hello@gortex.ai)
+
+Bugs and feature requests: [GitHub issues](https://github.com/GortexAI/franco/issues).
+
+If you run Franco yourself, put **your own** postal address in `compliance.postal_address`. The footer on your emails must name you, not Gortex.
