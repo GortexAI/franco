@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
 from franco.paths import PROJECT_ROOT
 
@@ -242,21 +242,103 @@ class CampaignConfig(BaseModel):
         return v
 
 
+class BenefitConfig(BaseModel):
+    """One of the (at most three) customer benefits every message lives in."""
+    key: str
+    text: str
+
+
+class PersonaAngleConfig(BaseModel):
+    """How the pitch shifts for one kind of buyer. ``match`` is a regex
+    tested (case-insensitively) against the contact's title."""
+    match: str
+    angle: str
+
+    @field_validator("match")
+    @classmethod
+    def _valid_regex(cls, v: str) -> str:
+        import re
+        try:
+            re.compile(v)
+        except re.error as e:
+            raise ValueError(f"persona match '{v}' is not a valid regex: {e}")
+        return v
+
+
+class FunnelConfig(BaseModel):
+    """A narrow, observable segment with its own story (raad mode).
+
+    ``match.require`` / ``match.exclude`` are conditions on what Franco
+    knows about the account: an UPPERCASE signal code (``RUNNING_GOOGLE_ADS``)
+    holds when the account carries that signal, ``CODE=text`` when its value
+    contains ``text`` (``TECH_STACK=AdSense``; ``a|b`` means either), and a lowercase account field
+    (``segment=marketplace``, ``industry=jobs``) when the field contains it.
+    Funnels are tried in the order listed, so put the narrowest first.
+    """
+    name: str = ""
+    benefit: str                     # a key from outreach.benefits
+    match: dict[str, list[str]] = {}
+    # The moment every company in this funnel reaches, in two or three
+    # plain sentences ("Every marketplace reaches a size where ...").
+    story: str
+    # How we handle it, bounded to what is true today.
+    solution: str
+    landing_url: str = ""
+    personas: list[PersonaAngleConfig] = []
+    # Approved follow-ups (day 5, 9, ...). A day-1 step here is used only
+    # when write_first_email is off.
+    steps: list[CampaignStepConfig] = []
+    write_first_email: bool = True
+
+    @field_validator("match")
+    @classmethod
+    def _valid_match(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
+        unknown = set(v) - {"require", "exclude"}
+        if unknown:
+            raise ValueError(f"funnel match only takes require/exclude, not {sorted(unknown)}")
+        return v
+
+    @field_validator("steps")
+    @classmethod
+    def _steps_ordered(cls, v: list[CampaignStepConfig]) -> list[CampaignStepConfig]:
+        days = [s.day for s in v]
+        if days != sorted(days) or len(set(days)) != len(days):
+            raise ValueError("funnel step days must be strictly increasing")
+        return v
+
+    @model_validator(mode="after")
+    def _first_email_source(self):
+        if not self.write_first_email and not (self.steps and self.steps[0].day == 1):
+            raise ValueError("with write_first_email off, the funnel's steps must start on day 1")
+        return self
+
+
 class OutreachConfig(BaseModel):
     """How sequences are produced.
 
     ``generated`` (default): the writer drafts sequences with the brain.
     ``templates``: approved copy from ``campaigns`` is used verbatim for
     accounts imported with a matching campaign key; no model is involved.
+    ``raad``: every account is placed in the narrowest matching funnel from
+    what Franco observed about it; email 1 is written from that funnel's
+    story, one customer benefit, the buyer's role and the account's own
+    facts, and the funnel's approved follow-ups come after it.
     """
 
     mode: str = "generated"
     campaigns: dict[str, CampaignConfig] = {}
+    benefits: list[BenefitConfig] = []
+    funnels: dict[str, FunnelConfig] = {}
+    first_email_max_words: int = 110
     # Business days are counted, and emails scheduled, in this timezone.
     timezone: str = "America/Los_Angeles"
     send_hour: int = 9
     # An observation older than this can't fill {{verified_observation}}.
     observation_max_age_days: int = 90
+    # Until a campaign is signed off (`franco preview signoff KEY`), stage
+    # only this many accounts per owner, always for review, and send none
+    # of them. 0 turns the preview off.
+    preview_accounts: int = 10
     # Approved wording per reply intent. The handler adapts it rather than
     # writing from scratch, e.g. {"later": "Understood. Is there ..."}.
     reply_templates: dict[str, str] = {}
@@ -265,9 +347,37 @@ class OutreachConfig(BaseModel):
     @classmethod
     def _valid_mode(cls, v: str) -> str:
         v = (v or "generated").strip().lower()
-        if v not in ("generated", "templates"):
-            raise ValueError("outreach.mode must be 'generated' or 'templates'")
+        if v not in ("generated", "templates", "raad"):
+            raise ValueError("outreach.mode must be 'generated', 'templates' or 'raad'")
         return v
+
+    @field_validator("benefits")
+    @classmethod
+    def _three_benefits(cls, v: list[BenefitConfig]) -> list[BenefitConfig]:
+        if len(v) > 3:
+            raise ValueError("at most three customer benefits: every message lives in one")
+        keys = [b.key for b in v]
+        if len(set(keys)) != len(keys):
+            raise ValueError("benefit keys must be unique")
+        return v
+
+    @model_validator(mode="after")
+    def _funnels_valid(self):
+        keys = {b.key for b in self.benefits}
+        for name, funnel in self.funnels.items():
+            if funnel.benefit not in keys:
+                raise ValueError(
+                    f"funnel '{name}' names benefit '{funnel.benefit}', which is not in "
+                    f"outreach.benefits ({', '.join(sorted(keys)) or 'none'})")
+            if name in self.campaigns:
+                raise ValueError(f"'{name}' is both a campaign and a funnel; use one key once")
+        if self.mode == "raad" and not self.funnels:
+            raise ValueError("outreach.mode 'raad' needs at least one funnel")
+        return self
+
+    def sequence_keys(self) -> list[str]:
+        """Every approved-copy campaign and funnel: what sign-off covers."""
+        return list(self.campaigns) + list(self.funnels)
 
     @field_validator("send_hour")
     @classmethod

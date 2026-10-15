@@ -641,6 +641,13 @@ class StateManager:
                 row = await cursor.fetchone()
                 return self._company_from_row(row) if row else None
 
+    async def list_company_ids(self, limit: int = 5000) -> list[str]:
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT id FROM companies ORDER BY created_at DESC LIMIT ?", (int(limit),)
+            ) as cursor:
+                return [r[0] for r in await cursor.fetchall()]
+
     async def get_company_by_domain(self, domain: str) -> Company | None:
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
@@ -1105,6 +1112,71 @@ class StateManager:
                            source_url=obs["evidence_url"],
                            checked=str(obs["observed_at"])[:10])
         return ctx
+
+    # ── Campaign preview and sign-off (approved copy) ──
+    # Until a campaign is signed off, only a small preview batch per owner
+    # is staged and none of it sends. Sign-off is a human decision, stored
+    # as settings row "signoff:<campaign_key>".
+
+    async def campaign_key_for(self, campaign_id: str) -> str:
+        if not campaign_id:
+            return ""
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT campaign_key FROM campaigns WHERE id = ?", (campaign_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return (row[0] or "") if row else ""
+
+    async def get_signoff(self, campaign_key: str) -> dict | None:
+        raw = await self.get_setting(f"signoff:{campaign_key}")
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return {"by": raw, "at": ""}
+
+    async def set_signoff(self, campaign_key: str, by: str):
+        await self.set_setting(f"signoff:{campaign_key}", json.dumps(
+            {"by": by, "at": _utcnow().isoformat(timespec="seconds")}))
+
+    async def clear_signoff(self, campaign_key: str):
+        await self.set_setting(f"signoff:{campaign_key}", "")
+
+    async def staged_accounts_by_owner(self, campaign_key: str) -> dict[str, int]:
+        """How many accounts already have this campaign staged, per owner."""
+        async with self._connect() as db:
+            async with db.execute(
+                """SELECT COALESCE(co.owner, ''), COUNT(DISTINCT co.id)
+                   FROM outbox o
+                   JOIN campaigns c ON c.id = o.campaign_id
+                   JOIN prospects p ON p.id = o.prospect_id
+                   JOIN companies co ON co.id = p.company_id
+                   WHERE c.campaign_key = ? AND o.kind = 'sequence'
+                   GROUP BY COALESCE(co.owner, '')""",
+                (campaign_key,),
+            ) as cursor:
+                return {owner: n for owner, n in await cursor.fetchall()}
+
+    async def preview_rows(self, campaign_key: str = "") -> list[dict]:
+        """The first email of every staged approved-copy account, with the
+        reason it exists: what a reviewer signs off on."""
+        sql = ("SELECT o.*, c.campaign_key FROM outbox o "
+               "JOIN campaigns c ON c.id = o.campaign_id "
+               "WHERE o.kind = 'sequence' AND o.step = 1 AND c.campaign_key != ''")
+        params: list = []
+        if campaign_key:
+            sql += " AND c.campaign_key = ?"
+            params.append(campaign_key)
+        sql += " ORDER BY c.campaign_key, o.created_at"
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(sql, params) as cursor:
+                items = [dict(r) for r in await cursor.fetchall()]
+        for item in items:
+            item["context"] = await self.outbox_context(item["prospect_id"])
+        return items
 
     # ── Suppression (shared do-not-contact list) ──
 

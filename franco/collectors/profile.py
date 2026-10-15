@@ -85,6 +85,12 @@ TECH_FINGERPRINTS: dict[str, tuple[str, ...]] = {
     "Housecall Pro": (r"housecallpro",),
     "CallRail": (r"cdn\.callrail\.com",),
     "Stripe": (r"js\.stripe\.com",),
+    # Publisher-side ads: the site SELLS ad space (a marketplace or feed
+    # already monetising through a third party).
+    "Google AdSense": (r"pagead2\.googlesyndication\.com", r"adsbygoogle"),
+    "Google Ad Manager": (r"securepubads\.g\.doubleclick\.net", r"googletag\.pubads\("),
+    "Prebid": (r"prebid(\.min)?\.js", r"\bpbjs\.que\b"),
+    "Amazon Publisher Services": (r"c\.amazon-adsystem\.com",),
 }
 
 GOOGLE_ADS = (r"googleadservices\.com", r"gtag/js\?id=AW-", r"google_conversion",

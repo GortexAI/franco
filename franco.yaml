@@ -64,3 +64,38 @@ usage:
     start: "22:00"
     end: "07:00"
     timezone: "America/New_York"
+
+# How sequences are produced.
+#   generated: the writer drafts each sequence with the model (default).
+#   templates: approved copy, sent word for word to accounts you import with
+#              `franco import accounts.csv` (see README → Approved-copy outreach).
+outreach:
+  mode: "generated"
+  timezone: "America/New_York"   # business days and send times are counted here
+  send_hour: 9
+  observation_max_age_days: 90   # older research can't fill {{verified_observation}}
+  preview_accounts: 10           # per owner, held for review until `franco preview signoff KEY`
+  campaigns: {}
+  #   M1:
+  #     name: "First campaign"
+  #     steps:
+  #       - day: 1
+  #         subject: "{{company}} and ..."
+  #         body: |
+  #           Hi {{first_name}},
+  #
+  #           I noticed {{verified_observation}}.
+  #           ...
+  #       - { day: 5, subject: "...", body: "..." }
+  reply_templates: {}            # approved wording per reply intent, e.g. later: "Understood. ..."
+
+# Commercial-email rules, enforced in code at send time. With require_footer
+# on, NO cold email is sent until postal_address is your real address.
+compliance:
+  require_footer: true
+  postal_address: ""             # your physical business address (CAN-SPAM)
+  footer: "{sender_name} | {company} | {postal_address}. Business outreach about {company}. Reply \"no thanks\" to stop."
+  unsubscribe_url: ""            # optional HTTPS one-click endpoint; mailto: is always offered
+  blocked_claims: []             # phrases no outgoing email may contain
+  send_opt_out_ack: false        # reply once after recording an opt-out
+  opt_out_ack: "Understood. I have recorded the request to stop."

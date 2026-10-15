@@ -739,7 +739,9 @@ async def get_outbox_api():
         return {
             "paused": await state.get_setting("sending_paused"),
             "autopilot": await _autopilot_status(state),
-            "pending": await state.get_outbox(status="pending_review", limit=100),
+            "pending": await _with_context(
+                state, await state.get_outbox(status="pending_review", limit=100)),
+            "previews": await _preview_status(state),
             "approved": await state.get_outbox(status="approved", limit=50),
             "sent": (await query_db(
                 "SELECT * FROM outbox WHERE status = 'sent' "
@@ -750,6 +752,197 @@ async def get_outbox_api():
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+def _outreach_config():
+    try:
+        from franco.config import load_config
+        return load_config().outreach
+    except Exception:
+        return None
+
+
+async def _with_context(state, items: list[dict]) -> list[dict]:
+    """Attach why each email exists (account, owner, observation, source),
+    and whether it is held in an unsigned preview."""
+    outreach = _outreach_config()
+    held: dict[str, bool] = {}
+    for item in items:
+        item["context"] = await state.outbox_context(item.get("prospect_id", ""))
+        cid = item.get("campaign_id", "")
+        if cid not in held:
+            key = await state.campaign_key_for(cid)
+            held[cid] = bool(
+                outreach and outreach.preview_accounts > 0 and key
+                and key in outreach.sequence_keys() and not await state.get_signoff(key))
+        item["preview"] = held[cid]
+    return items
+
+
+async def _preview_status(state) -> list[dict]:
+    """Every approved-copy campaign: in preview or signed off, and how many
+    accounts each owner has staged."""
+    outreach = _outreach_config()
+    if outreach is None or outreach.mode not in ("templates", "raad"):
+        return []
+    out = []
+    names = {k: (c.name or k) for k, c in outreach.campaigns.items()}
+    names.update({k: (f.name or k) for k, f in outreach.funnels.items()})
+    for key, name in names.items():
+        signoff = await state.get_signoff(key)
+        staged = await state.staged_accounts_by_owner(key)
+        out.append({
+            "key": key, "name": name,
+            "signed_off": bool(signoff) or outreach.preview_accounts <= 0,
+            "by": (signoff or {}).get("by", ""), "at": (signoff or {}).get("at", ""),
+            "staged": staged, "preview_size": outreach.preview_accounts,
+        })
+    return out
+
+
+@app.post("/api/outbox/{item_id}/edit")
+async def outbox_edit(item_id: str, request: Request):
+    """Change a draft's subject/body before it's approved."""
+    try:
+        data = await request.json()
+        subject = str(data.get("subject", "")).strip()
+        body = str(data.get("body", "")).strip()
+        if not subject or not body:
+            return JSONResponse({"success": False, "message": "subject and body are required"},
+                                status_code=400)
+        state = _state()
+        await state.init_db()
+        item = await state.get_outbox_item(item_id)
+        if not item or item["status"] != "pending_review":
+            return JSONResponse({"success": False,
+                                 "message": "only drafts awaiting review can be edited"},
+                                status_code=409)
+        await state.update_outbox_item(item_id, subject=subject, body=body)
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@app.post("/api/preview/{key}/{action}")
+async def preview_signoff(key: str, action: str, request: Request):
+    """Sign a campaign's preview off (its emails may send) or reopen it."""
+    if action not in ("signoff", "reopen"):
+        return JSONResponse({"success": False, "message": "unknown action"}, status_code=400)
+    outreach = _outreach_config()
+    if outreach is None or key not in outreach.sequence_keys():
+        return JSONResponse({"success": False, "message": f"unknown campaign '{key}'"},
+                            status_code=404)
+    try:
+        state = _state()
+        await state.init_db()
+        if action == "reopen":
+            await state.clear_signoff(key)
+        else:
+            try:
+                data = await request.json()
+            except Exception:
+                data = {}
+            by = str((data or {}).get("by", "")).strip()
+            if not by:
+                return JSONResponse({"success": False, "message": "say who is signing off"},
+                                    status_code=400)
+            await state.set_signoff(key, by)
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@app.get("/api/funnels")
+async def funnels_api():
+    """Raad mode: benefits, funnels, and how companies split across them."""
+    outreach = _outreach_config()
+    if outreach is None or not outreach.funnels:
+        return {"mode": getattr(outreach, "mode", ""), "benefits": [], "funnels": {}, "unplaced": 0}
+    from franco.funnels import funnel_report
+    state = _state()
+    await state.init_db()
+    report = await funnel_report(state, outreach)
+    for key, row in report["funnels"].items():
+        signoff = await state.get_signoff(key)
+        row["signed_off_by"] = (signoff or {}).get("by", "")
+    return {"mode": outreach.mode,
+            "benefits": [{"key": b.key, "text": b.text} for b in outreach.benefits],
+            **report}
+
+
+@app.get("/api/preview.csv")
+async def preview_csv(campaign: str = ""):
+    """The preview as a spreadsheet, to share with whoever signs it off."""
+    import csv
+    import io
+    from franco.outreach import PREVIEW_CSV_COLUMNS, preview_record
+    state = _state()
+    await state.init_db()
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=PREVIEW_CSV_COLUMNS)
+    writer.writeheader()
+    writer.writerows(preview_record(i) for i in await state.preview_rows(campaign))
+    return Response(out.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="preview.csv"'})
+
+
+# ── Bring your own lists (CSV) ──
+
+MAX_IMPORT_BYTES = 5_000_000
+
+
+@app.get("/api/import/template/{kind}")
+async def import_template(kind: str):
+    from franco.importer import TEMPLATES
+    if kind not in TEMPLATES:
+        return JSONResponse({"success": False, "message": "unknown kind"}, status_code=404)
+    return Response(TEMPLATES[kind], media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{kind}.csv"'})
+
+
+@app.post("/api/import")
+async def import_csv(request: Request):
+    """{kind, csv, dry_run, owner} → what was (or would be) imported.
+    The browser reads the file and sends its text; nothing is uploaded
+    anywhere but this local process."""
+    from franco.importer import KINDS, default_kind, run_import
+    try:
+        data = await request.json()
+        text = str(data.get("csv", ""))
+        if len(text.encode()) > MAX_IMPORT_BYTES:
+            return JSONResponse({"success": False, "message": "file is larger than 5 MB"},
+                                status_code=413)
+        from franco.config import load_config
+        config = load_config()
+        kind = data.get("kind") or default_kind(config)
+        if kind not in KINDS:
+            return JSONResponse({"success": False, "message": "unknown kind"}, status_code=400)
+        campaigns = set(config.outreach.sequence_keys())
+        if kind == "accounts" and not campaigns:
+            return JSONResponse({"success": False, "message":
+                                 "no approved campaigns or funnels configured"},
+                                status_code=400)
+        state = _state()
+        await state.init_db()
+        report = await run_import(
+            state, kind, text, campaigns, default_owner=str(data.get("owner", "")),
+            dry_run=bool(data.get("dry_run", True)), source="dashboard",
+        )
+        return {"success": True, "kind": kind, "dry_run": bool(data.get("dry_run", True)),
+                "imported": report.imported,
+                "rejected": [{"row": n, "why": w} for n, w in report.rejected],
+                "warnings": [{"row": n, "why": w} for n, w in report.warnings]}
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@app.get("/api/suppressions.csv")
+async def suppressions_export():
+    from franco.importer import suppressions_csv
+    state = _state()
+    await state.init_db()
+    return Response(suppressions_csv(await state.list_suppressions()), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="suppressions.csv"'})
 
 
 @app.post("/api/outbox/approve-all")
@@ -1409,6 +1602,8 @@ def start_dashboard(host: str = "127.0.0.1", port: int = 5555):
     """Start the dashboard server."""
     import uvicorn
 
+    if ENV_FILE.is_file():
+        load_dotenv(str(ENV_FILE))   # e.g. FRANCO_DASHBOARD_HOSTS
     print(f"\n  Franco Dashboard running at http://{host}:{port}")
     print("  Press Ctrl+C to stop.\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")

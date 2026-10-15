@@ -40,7 +40,22 @@ People will ask "how does this work?" — explain it simply:
 
 - **"How does it find people?"** → It searches the web (DuckDuckGo, Bing, Google) for companies matching your target profile, visits their websites, and finds team members. For emails, it learns each company's address pattern (from their site, or a free Hunter domain lookup) and verifies a single candidate through a free verification tier — every address is tagged verified / catch-all / guess, and only deliverable ones get sent. No expensive tools needed.
 
-- **"How does it write emails?"** → It uses proven cold email frameworks (like AIDA and PAS) with strict rules — short, personal, no AI-sounding language. Each email is tailored to the specific person and their company.
+- **"How does it write emails?"** → Three modes (`outreach.mode`):
+  - `generated` (default): proven frameworks (AIDA, PAS) with strict rules: short, personal, no AI-sounding language, tailored to each person.
+  - `templates` (approved copy): the user's signed-off sequences are sent word for word to accounts they researched; no model writes them.
+  - `raad`: Franco puts each account in the narrowest funnel it fits from what it observed (e.g. "marketplace already running AdSense"). It writes email 1 from that funnel's story, one of at most three customer benefits, the buyer's role angle and a sourced fact, then sends the funnel's approved follow-ups. Named after Raad Mobrem (CEO of Intro), whose outbound approach it follows. See "Raad mode" in the README.
+
+- **"Can I give it my own list?"** → Yes, as CSV files, from the terminal or the dashboard (Contacts → Import CSV). There are three kinds, each with a template:
+  - `accounts`: researched accounts with a campaign and a sourced observation;
+  - `contacts`: companies, optionally with a person each;
+  - `suppressions`: do-not-contact addresses or domains.
+
+  `franco import --template --kind contacts > contacts.csv`, then `franco import contacts.csv --kind contacts --dry-run`, then run it without `--dry-run`. Every row is validated first, and nothing is written on a dry run. Suppression lists also work with `franco suppress import FILE`.
+
+- **"Why isn't anything sending?"** → Check these in order:
+  1. **Preview.** New approved-copy campaigns and raad funnels start in preview: the first `preview_accounts` (default 10) accounts per owner are staged for review, and nothing sends until someone runs `franco preview signoff KEY --by NAME` (or uses the Outbox sign-off button).
+  2. **Postal address.** `compliance.postal_address` may be blank; no cold email sends without it.
+  3. **Kill switch.** Check `franco sending`.
 
 - **"Is it safe?"** → Yes. It runs locally on your machine, has daily usage limits, quiet hours, and send limits built in. It can't delete files, access your bank account, or do anything outside its sales workflow. Everything it does is logged in a local SQLite database you can inspect anytime.
 
@@ -48,7 +63,21 @@ People will ask "how does this work?" — explain it simply:
 
 - **"Can it use ChatGPT / Codex instead of Claude?"** → Yes, opt-in. Install Codex CLI 0.159.3 (`npm install -g @openai/codex@0.159.3`; other versions are refused), run `codex login` with ChatGPT, and set `brain: { provider: codex, model: gpt-5.5 }` in franco.yaml (or choose codex in `franco setup`, which suggests gpt-5.5, or `franco train <url> --provider codex --model gpt-5.5`). gpt-5.5 is the verified text-only model; a blank model fails on current accounts because the live catalog hides it, and code-mode models are refused. Claude stays the default; Franco never switches providers on its own. Each Codex call runs isolated with no tools — see "Using a ChatGPT plan instead (Codex)" in the README. macOS and Linux only; on Windows, Codex is refused, so use Claude. Don't edit the user's own `~/.codex` config to make it work.
 
-- **"What's the dashboard?"** → Run `franco dashboard` to see a local web UI at localhost:5555. It opens on **Today** — anything waiting on a decision, then the pipeline. Tabs for Signals, Companies, Contacts, Campaigns, Outbox, Conversations, Activity, Usage, Settings.
+- **"What's the dashboard?"** → Run `franco dashboard` to see a local web UI at localhost:5555. It opens on **Today**: anything waiting on a decision, then the pipeline. The other tabs:
+  - Signals, Companies, Activity, Usage, Settings;
+  - **Contacts**, with Import CSV;
+  - **Campaigns**, with the funnel table in raad mode;
+  - **Outbox**: each draft with why it exists, edit with `E`, preview sign-off cards, the autopilot toggle and the kill switch;
+  - Conversations.
+
+  It only accepts requests from its own page on localhost.
+
+- **"Where is my data?"** → All local, in `data/` (gitignored, never commit it):
+  - `franco.db` holds every company, person, email, reply and decision (personal data).
+  - `gmail_token.json` is the Gmail refresh token; treat it as a password.
+  - `franco.log`, `franco.pid` and `analytics.json` are the rest.
+
+  To back up while running: `sqlite3 data/franco.db ".backup data/backup.db"`. Before starting fresh, export suppressions (`franco suppress export`) and re-import them, so opt-outs survive. The README section "Your data folder" covers inspection, moving machines, and deletion requests.
 
 - **"What are signals?"** → Signals are the facts Franco collects about a business: who its current agency is, whether it's running ads, whether it has online booking, how it ranks. **Franco proposes; you confirm.** Nothing is collected until the user says yes on the Signals tab (or `franco signals --confirm ...`). That keeps spend intentional and makes every prospect list explainable — a cohort is a query over signals a human chose, not a black box.
 
@@ -203,6 +232,10 @@ These go in `franco.yaml` under `usage:`. Use sensible defaults unless they want
 - `quiet_hours`: 22:00-07:00 in their timezone
 - `max_daily_sends`: 50 (email send limit)
 
+**Compliance: ask for this, never guess it.** Ask for the user's physical business postal address and put it in `compliance.postal_address`. The template ships with `require_footer: true`, so no cold email sends until it is set. Their real settings belong in `franco.local.yaml` (gitignored; it replaces `franco.yaml` when present). Never put another person's or company's address in a user's footer. Also ask whether there are claims their emails must never make; those go in `compliance.blocked_claims`.
+
+**Outreach mode:** ask how they want emails produced: generated (default), approved copy (`templates`), or `raad` (funnels). For approved copy or raad, help them write `outreach.campaigns` or `outreach.funnels` (see README), and explain the preview and sign-off before their first batch.
+
 ### Step 7: Start Franco
 
 ```bash
@@ -227,6 +260,9 @@ Users will come back with questions and tasks. Common ones:
 - **"Train Franco on a different product"** → `franco train <new-url>`
 - **"How do I see the database?"** → It's at `data/franco.db`. They can open it with any SQLite tool, or ask you to query it.
 - **"I just want the prospect list"** → `franco export` writes a sequencer-ready CSV (verified/risky emails only; `--all` for everything). Also available as Export buttons on the dashboard's Contacts tab. Franco is valuable purely as a list-builder even if the user never lets it send.
+- **"I have a list already"** → `franco import FILE.csv --kind accounts|contacts|suppressions`, always `--dry-run` first. Or use the dashboard: Contacts → Import CSV.
+- **"Which funnel is this company in?"** (raad mode) → `franco funnels --company DOMAIN`. `franco funnels` shows how all companies split.
+- **"Show me the preview / sign it off"** → `franco preview KEY` (or `--csv preview.csv` to share), then `franco preview signoff KEY --by NAME`.
 
 ---
 
@@ -244,7 +280,12 @@ Users will come back with questions and tasks. Common ones:
 
 ### Sub-Agents
 - **Scout**: Python does all web searching (DuckDuckGo → Bing → Google → Serper API) and email resolution (pattern-first: cache → scraped mailto → Hunter domain search → default, then verify one candidate via Reoon/ZeroBounce/Hunter/SMTP; catch-alls flagged `risky`). Claude only scores/personalizes found data. Scout also collects **buying signals**: tech stack detected on each company's site (HubSpot, Shopify, Intercom, ~35 tools — zero extra requests) and hiring signals from careers pages. With `pip install python-jobspy` (optional), a job-board strategy discovers companies actively hiring for roles in `icp.hiring_signals` (falls back to `icp.titles`) — the strongest in-market signal. Signals land in prospects' personalization notes and boost their score.
-- **Writer**: Generates 3-email sequences (Email 1 < 75 words, Email 2 < 75, Email 3 < 40). Strict ban list on AI patterns.
+- **Writer**: Depends on `outreach.mode`:
+  - `generated`: 3-email sequences (Email 1 < 75 words, Email 2 < 75, Email 3 < 40), with a strict ban list on AI patterns.
+  - `templates`: renders approved copy verbatim for imported accounts (no model), on a business-day schedule.
+  - `raad` (`funnels.py`): places accounts in funnels, writes email 1 from the funnel brief, and queues the funnel's approved follow-ups.
+
+  In approved copy and raad, the first `preview_accounts` per owner are a preview held until sign-off, and every cold email gets the compliance footer.
 - **Sender**: Native providers (gmail/smtp) render merge vars per prospect and STAGE each email into the `outbox` (pending_review → approved → sent) with a scheduled send time; each heartbeat drains due, approved items with human-like pacing, the daily cap, the deterministic pre-send gate, and stop-on-reply. Legacy Instantly path deploys campaigns via API. Enforces daily send limits either way.
 - **Handler**: Polls the provider (or Instantly) for replies, dedups them, classifies intent, advances conversation stage, and queues auto-responses through the same outbox approval ladder. On native providers it also detects bounces → marks the address invalid, cancels the prospect's queued sends, and trips a global kill switch past a bounce-rate threshold.
 - **Analyst**: Runs on idle cycles. Generates `data/analytics.json` with pipeline stats and insights.
@@ -268,7 +309,11 @@ franco export                # Deliverable prospects → sequencer-ready CSV (pr
 franco export --all          # Full raw list, no filters
 franco gmail auth            # One-time Gmail OAuth (when provider: gmail)
 franco gmail test            # Verify the Gmail connection
-franco outbox                # Review queued emails; --approve <id> / --approve-all / --reject <id>
+franco outbox                # Review queued emails; --approve <id> / --approve-all / --reject <id> / --edit <id>
+franco import FILE           # CSV list: --kind accounts|contacts|suppressions; --dry-run / --verify / --template
+franco preview [KEY]         # Preview of a campaign/funnel (--csv FILE); preview signoff KEY --by NAME / reopen KEY
+franco funnels               # Raad mode: funnels and how companies split; --company DOMAIN explains one
+franco suppress list|add|remove|import|export   # Shared do-not-contact list (CSV in/out)
 franco signals               # The signal vocabulary; --confirm / --reject CODES (or 'free' / 'all')
 franco discover              # Find businesses; --providers / --estimate / --provider <key>
 franco autopilot on|off|default|status  # Send without review (runtime toggle)

@@ -23,7 +23,7 @@ from franco.integrations.instantly import InstantlyClient
 from franco.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
 from franco.outreach import (
     add_business_days, build_footer, compliance_problem, local_date,
-    send_at_utc, unsubscribe_headers,
+    send_at_utc, unsubscribe_headers, with_footer,
 )
 from franco.state import StateManager
 
@@ -375,6 +375,8 @@ class Sender:
         skipped = 0
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         seen_emails: set[str] = set()
+        compliance = getattr(self.config, "compliance", None)
+        footer = build_footer(compliance, self.config.persona) if compliance else ""
 
         for prospect_id in campaign.prospect_ids:
             prospect = await self.state.get_prospect(prospect_id)
@@ -400,7 +402,7 @@ class Sender:
                     step=step.step,
                     to_email=email,
                     subject=self._render(step.subject, prospect),
-                    body=self._render(step.body, prospect),
+                    body=with_footer(self._render(step.body, prospect), footer),
                     send_at=send_at.isoformat(),
                     status=initial_status,
                     provider=self.provider.name,
@@ -436,6 +438,10 @@ class Sender:
         if prospect.status in STOP_STATUSES:
             return f"prospect status '{prospect.status}'"
 
+        # Approved copy that hasn't been signed off stays in preview.
+        if await self._awaiting_signoff(item.get("campaign_id", "")):
+            return "defer"
+
         blocked = await self.state.suppression_for(item["to_email"])
         if blocked:
             return f"suppressed ({blocked['kind']}: {blocked['reason'] or 'listed'})"
@@ -457,6 +463,18 @@ class Sender:
                     return f"step {step - 1} was {prev['status']}"
                 return "defer"
         return ""
+
+    async def _awaiting_signoff(self, campaign_id: str) -> bool:
+        outreach = getattr(self.config, "outreach", None)
+        if outreach is None or outreach.preview_accounts <= 0 or not campaign_id:
+            return False
+        cache = self.__dict__.setdefault("_signoff_cache", {})
+        if campaign_id not in cache:
+            key = await self.state.campaign_key_for(campaign_id)
+            cache[campaign_id] = bool(
+                key and key in outreach.sequence_keys()
+                and not await self.state.get_signoff(key))
+        return cache[campaign_id]
 
     async def _retime_followups(self, item: dict):
         """Approved copy is spaced in business days from when each email
@@ -501,6 +519,7 @@ class Sender:
         )
         if not due:
             return
+        self._signoff_cache = {}   # sign-off can change between cycles
 
         allow_risky = getattr(self.config.channels.email, "send_to_risky", False)
         compliance = getattr(self.config, "compliance", None)
@@ -510,9 +529,15 @@ class Sender:
         if cold_blocked:
             logger.error(f"Sender: not sending cold email: {cold_blocked}.")
         sent = 0
+        # One step per person per cycle: sending step 1 re-times step 2 to a
+        # later business day, but step 2's stale row may still be in `due`.
+        sent_sequences: set[tuple[str, str]] = set()
         for item in due:
             if sent >= budget:
                 break
+            if item["kind"] == "sequence" and \
+                    (item.get("campaign_id"), item["prospect_id"]) in sent_sequences:
+                continue
 
             prospect = await self.state.get_prospect(item["prospect_id"])
             if prospect is None:
@@ -574,8 +599,10 @@ class Sender:
             )
             if prospect.status in ("new", "queued"):
                 await self.state.update_prospect_status(prospect.id, "contacted")
-            if item["kind"] == "sequence" and item.get("seq_day"):
-                await self._retime_followups(item)
+            if item["kind"] == "sequence":
+                sent_sequences.add((item.get("campaign_id"), item["prospect_id"]))
+                if item.get("seq_day"):
+                    await self._retime_followups(item)
 
             # A sent reply belongs in its conversation thread.
             if item["kind"] == "reply" and item.get("conversation_id"):
