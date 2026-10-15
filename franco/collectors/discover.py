@@ -41,7 +41,15 @@ def _log_safe(value) -> str:
 
 class DiscoveryError(RuntimeError):
     """A failure Franco explains to the user in its own words (no
-    internals), e.g. "OpenStreetMap has no category for 'widgets'"."""
+    internals), e.g. "OpenStreetMap has no category for 'widgets'".
+
+    The wording is kept on ``explanation`` and reports read only that: it is
+    text Franco wrote, never the exception's own rendering.
+    """
+
+    def __init__(self, explanation: str):
+        super().__init__(explanation)
+        self.explanation = explanation
 
 
 def describe_error(e: Exception) -> str:
@@ -52,7 +60,7 @@ def describe_error(e: Exception) -> str:
     paths or other internals. The full error is always in the log.
     """
     if isinstance(e, DiscoveryError):
-        return str(e)
+        return e.explanation
     if isinstance(e, httpx.TimeoutException):
         return "timed out (details in the log)"
     if isinstance(e, httpx.HTTPStatusError):
