@@ -123,6 +123,7 @@ async def run_prospecting(
         report.profile_run_id = run_id
     except Exception as e:
         logger.exception("profile stage failed")
-        report.errors.append(f"profile: {e}")
+        from franco.collectors.discover import describe_error
+        report.errors.append(f"profile: {describe_error(e)}")
 
     return report

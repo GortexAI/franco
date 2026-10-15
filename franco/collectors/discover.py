@@ -38,6 +38,29 @@ def _log_safe(value) -> str:
     """One log line per event: a search term or error can't forge another."""
     return str(value).replace("\r", " ").replace("\n", " ")
 
+
+class DiscoveryError(RuntimeError):
+    """A failure Franco explains to the user in its own words (no
+    internals), e.g. "OpenStreetMap has no category for 'widgets'"."""
+
+
+def describe_error(e: Exception) -> str:
+    """What a run report (shown in the dashboard) says about a failure.
+
+    Messages Franco wrote (DiscoveryError) are shown as they are. Anything
+    else gets fixed wording: exception text can carry request URLs, file
+    paths or other internals. The full error is always in the log.
+    """
+    if isinstance(e, DiscoveryError):
+        return str(e)
+    if isinstance(e, httpx.TimeoutException):
+        return "timed out (details in the log)"
+    if isinstance(e, httpx.HTTPStatusError):
+        return "HTTP error from the provider (details in the log)"
+    if isinstance(e, httpx.HTTPError):
+        return "network error (details in the log)"
+    return "failed (details in the log)"
+
 TIMEOUT = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=10.0)
 
 
@@ -526,7 +549,7 @@ class OpenStreetMap(DiscoveryProvider):
             return []
         tags = self._tags(query.term)
         if not tags:
-            raise RuntimeError(
+            raise DiscoveryError(
                 f"OpenStreetMap has no category for {query.term!r}. It can only "
                 f"search mapped trades ({', '.join(sorted(self.TAG_MAP))}). Use a "
                 f"listings or SERP provider for this one.")
@@ -558,12 +581,12 @@ class OpenStreetMap(DiscoveryProvider):
             logger.warning("osm: %s is throttling (%s) — trying the next mirror",
                            endpoint, r.status_code)
         else:
-            raise RuntimeError(
+            raise DiscoveryError(
                 "Every public Overpass mirror is throttling right now. This is "
                 "free volunteer infrastructure — wait a few minutes and re-run, "
                 "or use a paid provider for bulk work.")
         if r is None:
-            raise RuntimeError("Could not reach any Overpass mirror.")
+            raise DiscoveryError("Could not reach any Overpass mirror.")
         r.raise_for_status()
 
         out = []
@@ -611,7 +634,7 @@ def _dfs_items(payload: dict) -> list[dict]:
     usually makes the problem obvious immediately.
     """
     if payload.get("status_code") not in (20000, None):
-        raise RuntimeError(
+        raise DiscoveryError(
             f"DataForSEO {payload.get('status_code')}: "
             f"{payload.get('status_message')}")
     tasks = payload.get("tasks") or []
@@ -619,7 +642,7 @@ def _dfs_items(payload: dict) -> list[dict]:
         return []
     task = tasks[0]
     if task.get("status_code") not in (20000, None):
-        raise RuntimeError(
+        raise DiscoveryError(
             f"DataForSEO task {task.get('status_code')}: "
             f"{task.get('status_message')}")
     results = task.get("result") or []
@@ -772,7 +795,7 @@ async def run_discovery(
                     # to lose the queries that already succeeded.
                     logger.warning("discover: %s failed on %s: %s",
                                    _log_safe(provider_key), _log_safe(query.keyword()), _log_safe(e))
-                    report.errors.append(f"{query.keyword()}: {e}")
+                    report.errors.append(f"{query.keyword()}: {describe_error(e)}")
                     continue
 
                 report.found += len(found)
@@ -805,10 +828,10 @@ async def run_discovery(
                                cost_usd=report.actual_cost)
     except Exception as e:
         logger.exception("discover run failed")
-        report.errors.append(str(e))
+        report.errors.append(f"discovery run {describe_error(e)}")
         await state.finish_run(report.run_id, status="failed",
                                records=report.new_companies,
-                               cost_usd=report.actual_cost, error=str(e))
+                               cost_usd=report.actual_cost, error=describe_error(e))
     return report
 
 
