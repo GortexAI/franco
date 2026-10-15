@@ -96,3 +96,26 @@ def test_discovery_reports_never_carry_exception_text():
     for e in cases:
         text = describe_error(e)
         assert "SECRET" not in text and "/Users" not in text and "log" in text
+
+
+def test_a_crashed_background_run_reports_no_exception_text(client, monkeypatch):
+    import asyncio
+    import franco.pipeline as pipeline
+
+    async def boom(*a, **k):
+        raise RuntimeError("/Users/someone/secret/path exploded")
+
+    async def pending(self, *a, **k):
+        return 3
+
+    from franco.state import StateManager
+    monkeypatch.setattr(StateManager, "count_companies_needing_profile", pending)
+    monkeypatch.setattr(pipeline, "run_profile_stage", boom)
+    assert client.post("/api/profile/run").status_code == 200
+    for _ in range(50):
+        report = client.get("/api/discover/providers").json().get("last_report")
+        if report:
+            break
+        asyncio.run(asyncio.sleep(0.01))
+    assert report and report["stopped"] == "failed"
+    assert "secret" not in str(report) and "log" in report["errors"][0]

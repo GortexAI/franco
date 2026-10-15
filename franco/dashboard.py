@@ -1118,6 +1118,8 @@ async def get_activity():
 _discovery_task: asyncio.Task | None = None
 _discovery_report: dict | None = None
 
+from franco.collectors.discover import describe_error  # noqa: E402
+
 
 def _discovery_queries(body: dict, config):
     from franco.collectors.discover import build_queries
@@ -1225,7 +1227,7 @@ async def start_discovery(request: Request):
                 }
             except Exception as exc:
                 logger.exception("discovery run failed")
-                _discovery_report = {"errors": [str(exc)], "stopped": "failed"}
+                _discovery_report = {"errors": [describe_error(exc)], "stopped": "failed"}
 
         _discovery_report = None
         _discovery_task = asyncio.create_task(_go())
@@ -1264,7 +1266,7 @@ async def start_profile():
                 }
             except Exception as exc:
                 logger.exception("profile run failed")
-                _discovery_report = {"errors": [str(exc)], "stopped": "failed"}
+                _discovery_report = {"errors": [describe_error(exc)], "stopped": "failed"}
 
         _discovery_report = None
         _discovery_task = asyncio.create_task(_go())
