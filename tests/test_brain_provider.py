@@ -509,7 +509,7 @@ def client(monkeypatch, tmp_path):
     asyncio.run(StateManager(str(db)).init_db())
     monkeypatch.setattr(dash, "DB_PATH", db)
     monkeypatch.setattr(dash, "_quota_clients", {})
-    with TestClient(dash.app) as c:
+    with TestClient(dash.app, base_url="http://localhost") as c:
         c.db_path = db
         yield c
 

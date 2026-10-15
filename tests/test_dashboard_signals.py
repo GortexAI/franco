@@ -23,7 +23,7 @@ def client(monkeypatch):
         db = Path(tmp) / "franco.db"
         monkeypatch.setattr(dash, "DB_PATH", db)
         monkeypatch.setattr(dash, "WEB_DIR", Path(__file__).resolve().parent.parent / "franco" / "web")
-        with TestClient(dash.app) as c:
+        with TestClient(dash.app, base_url="http://localhost") as c:
             c.db_path = db
             yield c
 

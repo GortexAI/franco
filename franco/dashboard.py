@@ -42,6 +42,47 @@ def _resolve_config_file() -> Path:
 
 app = FastAPI(title="Franco Dashboard")
 
+# The dashboard has no login: it trusts whoever can reach 127.0.0.1. That
+# includes any web page open in your browser, which can POST to localhost,
+# and DNS rebinding, which can make a foreign site *read* it. So every
+# request must name a local host, and a browser may only change anything
+# (approve mail, turn on autopilot, rewrite .env) from the dashboard's own
+# page. Extra hostnames, e.g. for Docker: FRANCO_DASHBOARD_HOSTS=a,b
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _allowed_hosts() -> set[str]:
+    extra = os.environ.get("FRANCO_DASHBOARD_HOSTS", "")
+    return LOCAL_HOSTS | {h.strip().lower() for h in extra.split(",") if h.strip()}
+
+
+def _hostname(netloc: str) -> str:
+    netloc = (netloc or "").strip().lower()
+    if netloc.startswith("["):                      # [::1]:5555
+        return netloc[1:].split("]", 1)[0]
+    return netloc.rsplit(":", 1)[0] if netloc.count(":") == 1 else netloc
+
+
+@app.middleware("http")
+async def local_only(request: Request, call_next):
+    allowed = _allowed_hosts()
+    host = request.headers.get("host", "")
+    if _hostname(host) not in allowed:
+        return PlainTextResponse("Forbidden host", status_code=403)
+    if request.method not in SAFE_METHODS:
+        origin = request.headers.get("origin")
+        if origin is not None:
+            # Same origin means same scheme+host+port as this request.
+            from urllib.parse import urlsplit
+            o = urlsplit(origin)
+            if o.scheme not in ("http", "https") or o.netloc.lower() != host.lower():
+                return PlainTextResponse("Cross-origin request refused", status_code=403)
+        elif request.headers.get("sec-fetch-site", "same-origin") not in ("same-origin", "none"):
+            return PlainTextResponse("Cross-origin request refused", status_code=403)
+        # No Origin and no Sec-Fetch-Site: not a browser (curl, scripts).
+    return await call_next(request)
+
 # Franco process tracking
 _franco_process: subprocess.Popen | None = None
 _franco_started_at: datetime | None = None

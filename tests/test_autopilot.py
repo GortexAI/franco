@@ -124,7 +124,7 @@ def test_dashboard_toggle_approves_pending(monkeypatch):
             )
         asyncio.run(seed())
 
-        with TestClient(dash.app) as c:
+        with TestClient(dash.app, base_url="http://localhost") as c:
             assert c.get("/api/outbox").json()["autopilot"]["on"] is False
             r = c.post("/api/autopilot/on").json()
             assert r["success"] and r["approved"] == 1
@@ -137,3 +137,46 @@ def test_dashboard_toggle_approves_pending(monkeypatch):
             c.post("/api/autopilot/default")
             assert c.get("/api/outbox").json()["autopilot"]["override"] == ""
             assert c.post("/api/autopilot/bogus").status_code == 400
+
+
+# ── the dashboard only takes orders from its own page ──
+
+
+def test_dashboard_refuses_cross_site_and_rebound_requests(monkeypatch):
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    import franco.dashboard as dash
+
+    monkeypatch.setattr(dash, "_config_requires_approval", lambda: True)
+    with tempfile.TemporaryDirectory() as tmp:
+        monkeypatch.setattr(dash, "DB_PATH", Path(tmp) / "franco.db")
+        with TestClient(dash.app, base_url="http://localhost:5555") as c:
+            # A page on another site POSTing to localhost (a form, or fetch).
+            r = c.post("/api/autopilot/on", headers={"Origin": "https://evil.example"})
+            assert r.status_code == 403
+            r = c.post("/api/autopilot/on", headers={"Sec-Fetch-Site": "cross-site"})
+            assert r.status_code == 403
+            # Same port is part of the origin.
+            r = c.post("/api/autopilot/on", headers={"Origin": "http://localhost:9999"})
+            assert r.status_code == 403
+            assert c.get("/api/outbox").json()["autopilot"]["on"] is False
+
+            # DNS rebinding: a foreign hostname resolving to 127.0.0.1.
+            r = c.get("/api/outbox", headers={"Host": "evil.example:5555"})
+            assert r.status_code == 403
+
+            # The dashboard's own page, and non-browser clients, still work.
+            r = c.post("/api/autopilot/off", headers={"Origin": "http://localhost:5555"})
+            assert r.status_code == 200
+            assert c.post("/api/autopilot/default").status_code == 200
+
+        with TestClient(dash.app, base_url="http://127.0.0.1:5555") as c:
+            r = c.post("/api/autopilot/off", headers={"Origin": "http://127.0.0.1:5555"})
+            assert r.status_code == 200
+
+        monkeypatch.setenv("FRANCO_DASHBOARD_HOSTS", "franco.lan")
+        with TestClient(dash.app, base_url="http://franco.lan:5555") as c:
+            assert c.get("/api/outbox").status_code == 200

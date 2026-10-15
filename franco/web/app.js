@@ -42,6 +42,16 @@ function escHtml(s) {
   ));
 }
 
+// Scraped and imported URLs end up in href attributes. Escaping alone
+// doesn't stop a javascript: or data: link, so only http(s) gets through.
+function safeUrl(u) {
+  if (!u) return '';
+  try {
+    const url = new URL(String(u), location.origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
+  } catch { return ''; }
+}
+
 // ── One status vocabulary ──
 //
 // Franco's tables each carry their own words for state: a prospect is `new`,
@@ -446,7 +456,7 @@ async function loadDiscoverProviders() {
       (p.needs_key
         ? '<div class="row"><span class="k">Setup</span><span class="v">' +
           escHtml(p.env_keys.join(', ')) + ' in .env &middot; ' +
-          '<a href="' + escHtml(p.signup_url) + '" target="_blank" rel="noopener">get a key</a>' +
+          '<a href="' + escHtml(safeUrl(p.signup_url)) + '" target="_blank" rel="noopener">get a key</a>' +
           '</span></div>'
         : '') +
       (p.caveat ? '<div class="caveat">' + escHtml(p.caveat) + '</div>' : '') +
@@ -1210,7 +1220,7 @@ async function loadCompanies() {
   }
   let html = '<div class="table-card"><table><thead><tr><th>Company</th><th>Domain</th><th>Industry</th><th>Size</th><th>Location</th><th>Contacts</th><th>Source</th><th>Added</th></tr></thead><tbody>';
   data.forEach((c, i) => {
-    const website = c.website || (c.domain ? 'https://' + c.domain : '');
+    const website = safeUrl(c.website) || (c.domain ? safeUrl('https://' + c.domain) : '');
     const nameLink = website
       ? '<a href="' + escHtml(website) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + escHtml(c.name) + '</a>'
       : escHtml(c.name);
@@ -1241,7 +1251,7 @@ async function showCompanyContacts(index) {
       html += '<tr><td>' + escHtml(p.first_name) + ' ' + escHtml(p.last_name) + '</td>' +
         '<td>' + escHtml(p.title) + '</td><td>' + escHtml(p.email) + emailIcon + '</td>' +
         '<td>' + escHtml(p.phone) + phoneIcon + '</td>' +
-        '<td>' + (p.linkedin_url ? '<a href="' + escHtml(p.linkedin_url) + '" target="_blank" rel="noopener">Profile</a>' : '') + '</td>' +
+        '<td>' + (safeUrl(p.linkedin_url) ? '<a href="' + escHtml(safeUrl(p.linkedin_url)) + '" target="_blank" rel="noopener">Profile</a>' : '') + '</td>' +
         '<td>' + badge(p.status) + '</td><td class="muted">' + escHtml(p.source) + '</td></tr>';
     }
     html += '</tbody></table></div></div>';
