@@ -16,6 +16,7 @@ minor versions can still change behaviour.
   - Images are built for linux/amd64 and linux/arm64, with an SBOM and a signed build-provenance attestation. `docker-compose.yml` uses the published image.
 - **Release workflow:** tagging `vX.Y.Z` checks the version against `pyproject.toml` and the CHANGELOG, builds and tests the sdist and wheel, and creates the GitHub Release with that version's notes. See "Releasing" in `CONTRIBUTING.md`.
 - CI now tests Python 3.11, 3.12, 3.13 and 3.14 on Linux, macOS and Windows.
+- Every GitHub Action is pinned to a full commit SHA, with its version as a comment. Renovate (`helpers:pinGitHubActionDigests`) keeps the pins up to date, so a moved or hijacked tag can't change what runs with publishing and signing permissions.
 
 ### Fixed
 
