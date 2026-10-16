@@ -42,7 +42,7 @@ Issues = "https://github.com/GortexAI/franco/issues"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0,<9",
+    "pytest>=9.1,<10",
     "pytest-asyncio>=1.4,<2",
 ]
 # Only for scripts/record_demo.py, which re-records the README's dashboard GIF.
