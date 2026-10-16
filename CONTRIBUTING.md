@@ -57,6 +57,27 @@ generated lockfile. After changing a dependency, regenerate it (the command is
 at the top of `requirements.in`). `tests/test_dependencies.py` checks that the
 three files agree. Renovate opens dependency updates automatically.
 
+## Releasing
+
+Maintainers cut a release by tagging. Everything else is automated.
+
+1. Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] — YYYY-MM-DD`, and
+   start a new empty `## [Unreleased]` above it.
+2. Set `version = "X.Y.Z"` in `pyproject.toml`.
+3. Merge that through a pull request, then tag the merge commit:
+   `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+The tag triggers two workflows:
+
+| Workflow | What it does |
+|---|---|
+| `release.yml` | Checks that the tag matches `pyproject.toml` and that the CHANGELOG has notes for it. It then builds the sdist and wheel, runs the full suite and the installed-wheel test, and creates the GitHub Release with those notes, the files attached and provenance attestations. |
+| `docker.yml` | Publishes `ghcr.io/gortexai/franco:X.Y.Z`, `:X.Y` and `:latest` for linux/amd64 and linux/arm64, with an SBOM and an attestation. Every push to `main` also publishes `:edge`. |
+
+Franco isn't published to PyPI yet. It expects to run from a checkout (it
+keeps its config, prompts and data next to the code), so a `pip install`
+from PyPI wouldn't work until that changes.
+
 ## Never commit
 
 - `.env`, `franco.local.yaml` or anything in `data/`;

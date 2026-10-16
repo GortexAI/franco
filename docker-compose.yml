@@ -1,5 +1,9 @@
 services:
   franco:
+    # Published by .github/workflows/docker.yml. `docker compose pull` fetches
+    # it; `docker compose up --build` builds this checkout instead. Use
+    # FRANCO_TAG=edge for the latest main, or a version such as 0.4.0.
+    image: ghcr.io/gortexai/franco:${FRANCO_TAG:-latest}
     build: .
     env_file: .env
     volumes:

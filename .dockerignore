@@ -1,0 +1,30 @@
+# Never send secrets, personal data or local config into a build context.
+# The Dockerfile copies only what the image needs; this keeps everything
+# else off the build machine too.
+.env
+*.env
+franco.local.yaml
+data/
+linkedin_cookies.json
+skills/product_knowledge.md
+skills/competitive_intel.md
+
+# Local tooling and build output
+.git/
+.github/
+.venv/
+venv/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.claude/
+.agents/
+.DS_Store
+
+# Not needed in the image
+docs/
+tests/
+scripts/

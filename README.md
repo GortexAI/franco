@@ -62,6 +62,15 @@ franco dashboard                       # http://localhost:5555
 franco run                             # the heartbeat loop
 ```
 
+**Or run the published container image** (Linux, Intel or ARM). It already includes Chromium and the Claude CLI:
+
+```bash
+docker pull ghcr.io/gortexai/franco:latest      # or :edge for the latest main, or a version tag
+docker compose up -d                            # uses that image, with ./data, .env and your config mounted
+```
+
+Every image is built by GitHub Actions with a signed provenance attestation. You can check one with `gh attestation verify oci://ghcr.io/gortexai/franco:latest --owner GortexAI`.
+
 Or open the repo in Claude Code and say **"set up Franco for me"**. `CLAUDE.md` turns Claude into the setup guide: it checks what's missing and asks for one thing at a time.
 
 Put your real settings in `franco.local.yaml`. It is gitignored, and when it exists it is used instead of `franco.yaml`. The tracked `franco.yaml` stays a template.
