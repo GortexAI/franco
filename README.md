@@ -629,6 +629,8 @@ Franco is built and maintained by [Gortex](https://gortex.ai).
 
 Gortex · 440 N Wolfe Rd, Suite E133, Sunnyvale, CA 94085 · [hello@gortex.ai](mailto:hello@gortex.ai)
 
-Bugs and feature requests: [GitHub issues](https://github.com/GortexAI/franco/issues).
+Bugs and feature requests: [GitHub issues](https://github.com/GortexAI/franco/issues). Want to help? Start with [CONTRIBUTING.md](CONTRIBUTING.md); everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+**Found a security problem?** Please report it privately, as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 If you run Franco yourself, put **your own** postal address in `compliance.postal_address`. The footer on your emails must name you, not Gortex.

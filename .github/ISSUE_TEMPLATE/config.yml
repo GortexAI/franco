@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/GortexAI/franco/security/advisories/new
+    about: Report it privately, please. Never in a public issue.
+  - name: Questions and setup help
+    url: https://github.com/GortexAI/franco#readme
+    about: The README covers setup, every command and troubleshooting.
