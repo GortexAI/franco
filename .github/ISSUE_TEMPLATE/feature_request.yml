@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest something Franco should do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: How you picture it working (commands, config, dashboard).
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Effect on sending safety
+      description: Does this change what can send, when, or without review? (Approval, preview, gate, suppression, kill switch.)
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered

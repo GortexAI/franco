@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Franco doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems go through a [private advisory](https://github.com/GortexAI/franco/security/advisories/new), not here.**
+        Don't paste API keys, `.env` contents, real email addresses or prospect data. Replace them with `example.com` placeholders.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. franco import contacts.csv --kind contacts
+        2. franco run
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log or error output
+      description: The relevant lines from the terminal or `data/franco.log`, with personal data removed.
+      render: text
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Outreach mode
+      options: [generated, templates (approved copy), raad, not relevant]
+  - type: input
+    id: version
+    attributes:
+      label: Franco version or commit
+      placeholder: "0.3.0, or the output of: git rev-parse --short HEAD"
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS, Python version and brain provider
+      placeholder: "macOS 15, Python 3.13, claude"
