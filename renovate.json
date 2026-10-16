@@ -1,10 +1,13 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
   ],
   "pip-compile": {
-    "managerFilePatterns": ["/(^|/)requirements\\.txt$/"]
+    "managerFilePatterns": [
+      "/(^|/)requirements\\.txt$/"
+    ]
   },
   "pip_requirements": {
     "enabled": false
@@ -13,12 +16,17 @@
     "enabled": true
   },
   "vulnerabilityAlerts": {
-    "labels": ["security"]
+    "labels": [
+      "security"
+    ]
   },
   "packageRules": [
     {
       "description": "pyproject.toml and requirements.in carry the same ranges: update them (and the lock) together",
-      "matchManagers": ["pep621", "pip-compile"],
+      "matchManagers": [
+        "pep621",
+        "pip-compile"
+      ],
       "groupName": "python dependencies"
     }
   ]

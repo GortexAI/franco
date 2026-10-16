@@ -34,8 +34,12 @@ USER franco
 ENV PATH="/home/franco/.local/bin:${PATH}"
 
 # Claude Code CLI, installed as the runtime user so ~/.local/bin is correct.
-# `|| true` keeps the build working offline; the CLI is required at runtime.
-RUN curl -fsSL https://claude.ai/install.sh | sh || true
+# The installer is a bash script (under sh it fails on its first array), and
+# the build fails if `claude` didn't land: Franco can't think without it.
+# For an offline build only: --build-arg SKIP_CLAUDE_CLI=1.
+ARG SKIP_CLAUDE_CLI=0
+RUN if [ "$SKIP_CLAUDE_CLI" = "1" ]; then echo "Skipping the Claude CLI (SKIP_CLAUDE_CLI=1)"; \
+    else curl -fsSL https://claude.ai/install.sh | bash && claude --version; fi
 
 # Healthy = the heartbeat loop has touched the database recently
 # (2h window tolerates long heartbeat intervals and quiet-hour idling).
