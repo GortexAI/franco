@@ -48,6 +48,14 @@ def _report(body, subject="Delivery Status Notification (Failure)", in_reply_to=
                           headers={"references": references} if references else {})
 
 
+async def _actions(state, action_type):
+    import aiosqlite
+    async with aiosqlite.connect(state.db_path) as db:
+        async with db.execute("SELECT details_json FROM actions WHERE action_type = ?",
+                              (action_type,)) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+
 async def _run(state, *messages):
     provider = FakeProvider()
     provider.inbound = list(messages)
@@ -92,10 +100,20 @@ async def test_real_bounce_found_through_references_or_recent_send(state):
     await _run(state, _report(RFC3464_FAILURE, references="<other@x> <m9@x>"))
     assert (await state.get_prospect(pid)).email_status == "invalid"
 
-    pid2 = await seed_prospect(state, email="bob@beta.com", status="contacted")
-    await _sent(state, pid2, to="bob@beta.com", message_id="<n1@x>", campaign="c2")
+
+
+@pytest.mark.asyncio
+async def test_address_only_match_is_flagged_for_review_not_acted_on(state):
+    """Anyone who knows whom Franco emailed could forge this one."""
+    pid = await seed_prospect(state, email="bob@beta.com", status="contacted")
+    for i in range(12):
+        await _sent(state, pid, to="bob@beta.com", message_id=f"<n{i}@x>", campaign=f"c{i}")
     await _run(state, _report("Your message wasn't delivered to bob@beta.com."))
-    assert (await state.get_prospect(pid2)).email_status == "invalid"
+    assert (await state.get_prospect(pid)).email_status == "verified"
+    assert await state.get_setting("bounce_count", "0") == "0"
+    assert await state.get_setting("sending_paused") == ""
+    review = await _actions(state, "bounce_needs_review")
+    assert review and "bob@beta.com" in review[0]
 
 
 @pytest.mark.asyncio
@@ -126,6 +144,7 @@ async def test_old_sends_are_not_matched_by_address_alone(state):
     await _sent(state, pid, days_ago=30)
     await _run(state, _report(GMAIL_FAILURE))
     assert (await state.get_prospect(pid)).email_status == "verified"
+    assert await _actions(state, "bounce_needs_review") == []
 
 
 @pytest.mark.asyncio

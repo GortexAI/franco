@@ -500,47 +500,63 @@ class Handler:
             logger.info("Handler: no new replies.")
         return complete
 
-    async def _match_bounce(self, msg) -> tuple[dict | None, str]:
-        """The sent email a delivery report is about, or why it isn't trusted.
+    async def _match_bounce(self, msg) -> tuple[dict | None, str, str]:
+        """The sent email a delivery report is about, how it was matched
+        ("message-id" or "address"), or why it isn't trusted.
 
         Anyone can send mail that *looks* like a bounce. Acting on it marks a
         contact's address invalid and moves the bounce rate toward the kill
-        switch, so a report must point at an email Franco really sent (by
-        Message-ID, or by naming an address Franco emailed in the last two
-        weeks) and must name that email's recipient.
+        switch, so a report must point at an email Franco really sent and
+        name that email's recipient. Only a Message-ID match is acted on
+        automatically: Franco's Message-IDs reach nobody but the recipient.
+        A match by address alone could be forged by anyone who knows whom
+        Franco emails, so it is left for a person to review.
         """
         from franco.integrations.mail_provider import parse_bounce, referenced_ids
 
         info = parse_bounce(msg)
-        item = None
+        item, matched_by = None, "message-id"
         for ref in referenced_ids(msg):
             item = await self.state.find_outbox_by_message_id(ref)
             if item:
                 break
         if item is None:
+            matched_by = "address"
             for address in sorted(info.recipients):
                 item = await self.state.find_recent_sent_to(address)
                 if item:
                     break
         if item is None or item.get("status") != "sent":
-            return None, "matches no email Franco sent"
+            return None, "matches no email Franco sent", ""
         if info.recipients and item["to_email"].lower() not in info.recipients:
-            return None, "names a different recipient than the email it refers to"
+            return None, "names a different recipient than the email it refers to", ""
         if (item.get("error") or "") == "bounced":
-            return None, "already counted"
+            return None, "already counted", ""
         if not info.permanent:
-            return None, "a temporary delay, not a failure"
-        return item, ""
+            return None, "a temporary delay, not a failure", ""
+        return item, "", matched_by
 
     async def _handle_bounce(self, msg):
         """A bounce is a data bug AND a reputation threat. Fix both, but
         only for reports that match an email Franco really sent."""
-        outbox_item, why_not = await self._match_bounce(msg)
+        outbox_item, why_not, matched_by = await self._match_bounce(msg)
         if outbox_item is None:
             logger.info(f"Handler: delivery report not acted on: {why_not}.")
             await self.state.log_action(
                 action_type="bounce_ignored", agent="handler",
                 details={"reason": why_not, "subject": (msg.subject or "")[:80]},
+            )
+            return
+        if matched_by != "message-id":
+            # Plausible, but forgeable: flag it, change nothing.
+            logger.warning(
+                f"Handler: possible bounce for {outbox_item['to_email']} matched by "
+                "address only; not acted on automatically. Check the mailbox, then "
+                "suppress the address if it really bounced.")
+            await self.state.log_action(
+                action_type="bounce_needs_review", agent="handler",
+                details={"to": outbox_item["to_email"], "outbox_id": outbox_item["id"],
+                         "from": msg.from_email, "subject": (msg.subject or "")[:80]},
             )
             return
         await self.state.update_outbox_item(outbox_item["id"], error="bounced")
