@@ -7,6 +7,24 @@ minor versions can still change behaviour.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-16
+
+### Added
+
+- **`pip install franco`.** Franco is on [PyPI](https://pypi.org/project/franco/) and works without a checkout:
+  - `franco init [DIR]` creates a **home folder**: `franco.yaml`, a private `.env`, editable `prompts/` and `skills/`, `data/` and a `.gitignore` that keeps credentials and contact data out of git. It never overwrites existing files.
+  - Franco finds its home as `$FRANCO_HOME`, else the source checkout (unchanged for clones and Docker), else the current folder when it has a `franco.yaml`, else `~/.franco`.
+  - The wheel bundles the default prompts, skills and templates. A file in the home folder wins; delete it to fall back to the shipped version.
+  - A pip-installed Franco never writes into its installed package.
+  - `franco install` only fetches Chromium when Franco was installed from PyPI.
+- **Releases publish to PyPI** with trusted publishing (no stored token) and PEP 740 attestations, before the GitHub Release is created.
+
+### Fixed
+
+- `franco train` created `skills/` files without creating the folder first, which failed in a fresh home folder.
+- The dashboard's setup check counted only a `.venv` inside the project as a virtual environment.
+
+
 ## [0.4.0] — 2026-10-16
 
 Franco is now open source under [GortexAI/franco](https://github.com/GortexAI/franco), published as a container image, and released automatically.

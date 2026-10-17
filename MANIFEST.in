@@ -1,0 +1,7 @@
+# The sdist must carry what setup.py bundles into the wheel.
+include franco.yaml .env.example LICENSE README.md CHANGELOG.md requirements.in requirements.txt
+recursive-include prompts *.md
+recursive-include skills *.md
+exclude skills/product_knowledge.md skills/competitive_intel.md
+recursive-include franco/web *
+global-exclude __pycache__ *.py[cod] .DS_Store

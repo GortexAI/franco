@@ -1,9 +1,11 @@
 # Release: push a tag vX.Y.Z (matching [project].version in pyproject.toml).
 #
 #   1. check    the tag matches pyproject.toml and CHANGELOG.md has notes for it
-#   2. build    sdist + wheel, `twine check`, full test suite, installed-wheel test
-#   3. release  GitHub Release with those notes, the built files attached and
-#               build-provenance attestations
+#   2. build    sdist + wheel, `twine check`, full test suite, installed-wheel tests
+#   3. pypi     publish to https://pypi.org/project/franco/ with trusted
+#               publishing (no stored token) and PEP 740 attestations
+#   4. release  GitHub Release with those notes, the built files attached and
+#               build-provenance attestations (only after PyPI accepted them)
 #
 # The container image for the same tag is published by docker.yml.
 # How to cut a release: see "Releasing" in CONTRIBUTING.md.
@@ -76,8 +78,30 @@ jobs:
             release-notes.md
           if-no-files-found: error
 
-  release:
+  pypi:
     needs: build
+    runs-on: ubuntu-latest
+    # Trusted publishing: PyPI accepts uploads only from this workflow, in
+    # this environment, on this repository. Set up once on pypi.org (see
+    # "Releasing" in CONTRIBUTING.md). The environment only allows v* tags.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/franco/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          attestations: true
+
+  release:
+    needs: [build, pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write

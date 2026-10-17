@@ -19,7 +19,7 @@ from franco.state import StateManager
 
 logger = logging.getLogger("franco.brain")
 
-from franco.paths import PROJECT_ROOT
+from franco.paths import PROJECT_ROOT, resource
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 SKILLS_DIR = PROJECT_ROOT / "skills"
@@ -632,7 +632,7 @@ class Brain:
 
     def load_prompt(self, prompt_name: str, **kwargs) -> str:
         """Load a prompt template from the prompts/ directory and fill in variables."""
-        prompt_file = PROMPTS_DIR / f"{prompt_name}.md"
+        prompt_file = resource("prompts", f"{prompt_name}.md")
         try:
             template = prompt_file.read_text()
         except FileNotFoundError:
@@ -653,7 +653,7 @@ class Brain:
 
     def load_skill(self, skill_name: str) -> str:
         """Load a skill knowledge file from the skills/ directory."""
-        skill_file = SKILLS_DIR / f"{skill_name}.md"
+        skill_file = resource("skills", f"{skill_name}.md")
         try:
             return skill_file.read_text()
         except FileNotFoundError:

@@ -74,9 +74,27 @@ The tag triggers two workflows:
 | `release.yml` | Checks that the tag matches `pyproject.toml` and that the CHANGELOG has notes for it. It then builds the sdist and wheel, runs the full suite and the installed-wheel test, and creates the GitHub Release with those notes, the files attached and provenance attestations. |
 | `docker.yml` | Publishes `ghcr.io/gortexai/franco:X.Y.Z`, `:X.Y` and `:latest` for linux/amd64 and linux/arm64, with an SBOM and an attestation. Every push to `main` also publishes `:edge`. |
 
-Franco isn't published to PyPI yet. It expects to run from a checkout (it
-keeps its config, prompts and data next to the code), so a `pip install`
-from PyPI wouldn't work until that changes.
+`release.yml` also publishes the sdist and wheel to
+[PyPI](https://pypi.org/project/franco/), before the GitHub Release is created,
+using **trusted publishing**: there is no PyPI token anywhere. PyPI accepts the
+upload only from `release.yml` in this repository, running in the `pypi`
+environment, which only `v*.*.*` tags can deploy to.
+
+One-time setup on pypi.org, by a maintainer: under **Your account →
+Publishing**, add a (pending) trusted publisher for project `franco` with owner
+`GortexAI`, repository `franco`, workflow `release.yml` and environment `pypi`.
+
+### How the package finds its files
+
+A pip-installed Franco has no checkout. `franco/paths.py` picks a *home
+folder* (`$FRANCO_HOME`, else the checkout, else the current folder when it
+has a `franco.yaml`, else `~/.franco`), and the wheel bundles the default
+prompts, skills, `franco.yaml` and `.env.example` in `franco/_bundled`.
+`setup.py` copies them in at build time from the repository's top-level
+files, so there is only one copy of each in git. Files are read from the home
+folder first and from the bundle otherwise. `tests/test_packaging.py` installs
+the wheel into an empty directory and checks all of this, including that
+Franco never writes into its installed package.
 
 ## Never commit
 
