@@ -28,6 +28,16 @@
         "pip-compile"
       ],
       "groupName": "python dependencies"
+    },
+    {
+      "description": "Workflow Python versions follow the tested matrix in tests.yml; change them by hand, together",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "python"
+      ],
+      "enabled": false
     }
   ]
 }
