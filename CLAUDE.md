@@ -89,6 +89,15 @@ Walk through these steps conversationally. Ask one thing at a time. Don't overwh
 
 ### Step 1: Install Dependencies
 
+If they just want to *use* Franco, install it from PyPI and create a home folder:
+
+```bash
+pipx install franco          # or: pip install franco, in a virtualenv
+franco init ~/franco && cd ~/franco
+```
+
+The home folder holds franco.yaml, .env, editable prompts/ and skills/, and data/. Franco finds it as `$FRANCO_HOME`, else the source checkout, else the current folder when it has a franco.yaml, else `~/.franco`. If they cloned the repo (to change Franco itself), the clone is the home:
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate && pip install -e .
 ```

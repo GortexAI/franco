@@ -172,9 +172,10 @@ async def get_setup_status():
     # 1. Venv
     checks.append({
         "id": "venv", "label": "Python virtual environment",
-        "done": (PROJECT_ROOT / ".venv").is_dir(),
+        "done": sys.prefix != sys.base_prefix or (PROJECT_ROOT / ".venv").is_dir(),
         "required": True,
-        "help": "Run: python3 -m venv .venv && source .venv/bin/activate && pip install -e .",
+        "help": ("Run Franco from a virtualenv: python3 -m venv .venv && "
+                 "source .venv/bin/activate && pip install franco"),
     })
 
     # 2. Env file
@@ -498,6 +499,7 @@ async def start_franco():
             _franco_process = subprocess.Popen(
                 [sys.executable, "-m", "franco"],
                 cwd=str(PROJECT_ROOT),
+                env={**os.environ, "FRANCO_HOME": str(PROJECT_ROOT)},
                 stdout=log_handle,
                 stderr=log_handle,
                 start_new_session=True,

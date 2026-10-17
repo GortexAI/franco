@@ -586,5 +586,6 @@ def _find_config_file() -> str:
     raise ConfigFileNotFoundError(
         "franco.yaml not found in "
         + ", ".join(str(p.parent) for p in candidates)
-        + ". Create one from franco.yaml.example or run 'franco setup'."
+        + ". Run 'franco init' in an empty folder to create one, or point "
+          "FRANCO_HOME at the folder that has it."
     )

@@ -35,12 +35,80 @@ def _check_python_version():
     sys.exit(1)
 
 
+HOME_GITIGNORE = """# Franco home: never commit credentials, contact data or real config
+.env
+*.env
+franco.local.yaml
+data/
+linkedin_cookies.json
+skills/product_knowledge.md
+skills/competitive_intel.md
+"""
+
+
+def cmd_init(args):
+    """Create a Franco home folder: config, .env, editable prompts and skills."""
+    import shutil
+    from franco.paths import bundled
+
+    target = Path(args.directory).expanduser().resolve() if args.directory else Path.cwd()
+    target.mkdir(parents=True, exist_ok=True)
+    made, kept = [], []
+
+    def place(src: Path, dest: Path, mode: int | None = None):
+        if dest.exists():
+            kept.append(dest.relative_to(target).as_posix())
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+        if mode is not None:
+            dest.chmod(mode)
+        made.append(dest.relative_to(target).as_posix())
+
+    place(bundled() / "franco.yaml", target / "franco.yaml")
+    place(bundled() / ".env.example", target / ".env", mode=0o600)
+    for kind in ("prompts", "skills"):
+        for src in sorted(bundled(kind).glob("*.md")):
+            if src.name in ("product_knowledge.md", "competitive_intel.md"):
+                continue   # generated per product by `franco train`, never shipped
+            place(src, target / kind / src.name)
+    (target / "data").mkdir(exist_ok=True)
+    gitignore = target / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(HOME_GITIGNORE)
+        made.append(".gitignore")
+
+    print(f"\n  Franco home: {target}")
+    if made:
+        print(f"  Created: {', '.join(made)}")
+    if kept:
+        print(f"  Kept your existing: {', '.join(kept)}")
+    print(f"""
+  Next, from that folder (Franco finds it by its franco.yaml), or with
+  FRANCO_HOME={target} set:
+
+    cd {target}
+    franco install              # Chromium, for LinkedIn and JS-heavy sites
+    claude login                # the subscription Franco thinks with
+    $EDITOR .env                # mail provider + verifier keys
+    franco setup                # or: franco train https://your-site.com
+    franco dashboard
+
+  Prompts and skills here are yours to edit; delete one to go back to the
+  version that ships with Franco. Keep .env and data/ private.
+""")
+
+
 def cmd_install(args):
     """Install all dependencies including Playwright browsers."""
     _check_python_version()
     print("\n  Installing Franco dependencies...\n")
 
-    # Install Python packages
+    # Install Python packages (a pip-installed Franco already has them)
+    from franco.paths import checkout_root
+    if checkout_root() is None:
+        print("  [1/2] Python packages: already installed with Franco.\n")
+        return _install_browsers()
     print("  [1/2] Installing Python packages...")
     requirements = Path(args._project_root) / "requirements.txt"
     if requirements.exists():
@@ -58,8 +126,14 @@ def cmd_install(args):
               "(python3 -m venv .venv && source .venv/bin/activate).")
         sys.exit(1)
     print("  ✓ Python packages installed.\n")
+    _install_browsers()
 
-    # Install Playwright browsers
+    _ensure_importable(args._project_root)
+    print("  Franco is installed. Run 'franco setup' next.\n")
+
+
+def _install_browsers():
+    """Chromium for Playwright: used for LinkedIn and JavaScript-heavy sites."""
     print("  [2/2] Installing Playwright browsers...")
     try:
         result = subprocess.run(
@@ -73,9 +147,6 @@ def cmd_install(args):
         print("\n  Playwright browser install failed (optional — needed for LinkedIn).")
     else:
         print("  ✓ Playwright browsers installed.\n")
-
-    _ensure_importable(args._project_root)
-    print("  Franco is installed. Run 'franco setup' next.\n")
 
 
 def _ensure_importable(project_root: str):
@@ -990,6 +1061,13 @@ def main():
         description="Franco — Autonomous AI Sales Agent. Always Be Closing.",
     )
     subparsers = parser.add_subparsers(dest="command")
+
+    # franco init
+    sub = subparsers.add_parser(
+        "init", help="Create a Franco home folder (config, .env, prompts, skills, data)")
+    sub.add_argument("directory", nargs="?", default="",
+                     help="Folder to set up (default: the current folder)")
+    sub.set_defaults(func=cmd_init)
 
     # franco install
     sub = subparsers.add_parser("install", help="Install dependencies")

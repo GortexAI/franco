@@ -668,6 +668,7 @@ Do NOT pursue prospects who:
 """
 
         skills_path = PROJECT_ROOT / "skills" / "product_knowledge.md"
+        skills_path.parent.mkdir(parents=True, exist_ok=True)
         skills_path.write_text(knowledge)
         print(f"      Generated: skills/product_knowledge.md")
 
@@ -716,6 +717,7 @@ What prospects do instead of buying a solution like ours:
 """
 
         skills_path = PROJECT_ROOT / "skills" / "competitive_intel.md"
+        skills_path.parent.mkdir(parents=True, exist_ok=True)
         skills_path.write_text(cards)
         print(f"      Generated: skills/competitive_intel.md")
 

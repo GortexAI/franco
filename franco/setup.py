@@ -16,9 +16,9 @@ from franco.state import StateManager
 
 logger = logging.getLogger("franco.setup")
 
-from franco.paths import PROJECT_ROOT
+from franco.paths import PROJECT_ROOT, resource
 ENV_FILE = PROJECT_ROOT / ".env"
-ENV_EXAMPLE = PROJECT_ROOT / ".env.example"
+ENV_EXAMPLE = resource("", ".env.example")
 CONFIG_FILE = PROJECT_ROOT / "franco.yaml"
 
 

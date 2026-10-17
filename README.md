@@ -50,17 +50,38 @@ There is no model API bill. Model calls go through `claude` (Claude Pro or Max) 
 - Claude Code, logged in with `claude login`, on a Pro or Max plan. Codex is the alternative; see [below](#using-a-chatgpt-plan-codex).
 - A mailbox to send from. Google Workspace is recommended.
 
-```bash
-git clone https://github.com/GortexAI/franco.git && cd franco
-python3.13 -m venv .venv && source .venv/bin/activate && pip install -e .
+**Install from PyPI** (recommended):
 
-cp .env.example .env && $EDITOR .env   # mail provider + verifier keys, documented inline
+```bash
+pipx install franco                    # or, in a virtualenv: pip install franco
+franco init ~/franco && cd ~/franco    # your home folder: config, .env, prompts, skills, data
+franco install                         # Chromium, for LinkedIn and JavaScript-heavy sites
+
+$EDITOR .env                           # mail provider + verifier keys, documented inline
 franco gmail auth                      # one-time browser login when provider: gmail
 franco gmail test
 
 franco dashboard                       # http://localhost:5555
 franco run                             # the heartbeat loop
 ```
+
+Franco works in one **home folder**. It finds it in this order:
+1. `$FRANCO_HOME`, when set;
+2. the source checkout, when you run from a clone;
+3. the current folder, when it has a `franco.yaml`;
+4. `~/.franco` otherwise.
+
+`franco init` creates a home folder. The prompts and skills it copies there are yours to edit; delete one to go back to the version that ships with Franco.
+
+**Or run from a clone** (to change Franco itself):
+
+```bash
+git clone https://github.com/GortexAI/franco.git && cd franco
+python3.13 -m venv .venv && source .venv/bin/activate && pip install -e .
+cp .env.example .env && $EDITOR .env
+```
+
+The clone is its own home folder: config, `prompts/`, `skills/` and `data/` live next to the code.
 
 **Or run the published container image** (Linux, Intel or ARM). It already includes Chromium and the Claude CLI:
 
@@ -523,7 +544,7 @@ Franco automates outreach, but **you are the sender.**
 
 ## Your data folder
 
-Everything Franco knows and does lives in `data/`, next to the code, on your machine. It is created on first run and is **gitignored**. Never commit it, never put it in a shared drive, and never attach it to an issue.
+Everything Franco knows and does lives in `data/` inside your [home folder](#quick-start) (next to the code in a clone, wherever you ran `franco init` for a pip install), on your machine. It is created on first run. In a clone and in a `franco init` folder it is **gitignored**. Never commit it, never put it in a shared drive, and never attach it to an issue.
 
 | File | What it holds | Sensitive? |
 |---|---|---|
