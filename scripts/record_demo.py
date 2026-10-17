@@ -36,6 +36,7 @@ from playwright.async_api import async_playwright
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from franco.models.campaign import Campaign, EmailStep  # noqa: E402
 from franco.models.company import Company  # noqa: E402
 from franco.models.prospect import Prospect  # noqa: E402
 from franco.signals import seed_signal_catalog  # noqa: E402
@@ -103,27 +104,33 @@ F1_PITCH = ("I'm building Gortex to help feed-based platforms make sponsored con
             "part of a deliberate discovery experience, rather than a separate "
             "insertion process.")
 
-# (contact index, subject, observation, pitch, close)
+# (contact index, subject, observation, pitch, close, source page)
 OUTBOX = [
     (0, "Sponsored listings at Tradeloft",
      "Tradeloft's seller help center describes a paid Featured Listing upgrade",
-     M1_PITCH, "Would a short outline of a one-surface pilot be useful?"),
+     M1_PITCH, "Would a short outline of a one-surface pilot be useful?", "/help/featured-listings"),
     (4, "Sponsored posts at Threadwise",
      "Threadwise's advertise page offers sponsored posts in the main developer feed",
-     F1_PITCH, "Would a short native-sponsorship outline be useful?"),
+     F1_PITCH, "Would a short native-sponsorship outline be useful?", "/advertise"),
     (1, "Sponsored listings at Petlane",
      "Petlane is hiring a Head of Monetization",
-     M1_PITCH, "Would a short outline of a one-surface pilot be useful?"),
+     M1_PITCH, "Would a short outline of a one-surface pilot be useful?", "/careers"),
     (5, "Sponsored posts at Climbline",
      "Climbline's partner page lists gear brands sponsoring the route feed",
-     F1_PITCH, "Would a short native-sponsorship outline be useful?"),
+     F1_PITCH, "Would a short native-sponsorship outline be useful?", "/partners"),
 ]
+
+# The compliance footer every cold email carries (sender identity is real;
+# everything else in the demo is invented).
+FOOTER = ("Hemin Joshi | Gortex | 440 N Wolfe Rd, Suite E133, Sunnyvale, CA, 94085\n"
+          "Business outreach about Gortex. Reply \"no thanks\" to stop.")
 
 PROPOSED = {"SERP_RANK", "LIKELY_OWNER", "REGISTRY_VERIFIED"}  # left for the viewer
 
 
 def email_body(first: str, observation: str, pitch: str, close: str) -> str:
-    return (f"Hi {first},\n\nI noticed {observation}.\n\n{pitch}\n\n{close}\n\nHemin")
+    return (f"Hi {first},\n\nI noticed {observation}.\n\n{pitch}\n\n{close}\n\nHemin"
+            f"\n\n{FOOTER}")
 
 
 def demo_config() -> dict:
@@ -146,6 +153,26 @@ def demo_config() -> dict:
                                       "Ads Product Manager"])
     cfg["channels"]["email"]["provider"] = "gmail"
     cfg["channels"]["linkedin"]["enabled"] = False
+    # Approved copy, as Gortex runs it: two campaigns, both still in preview.
+    step = lambda pitch, close: {"day": 1, "subject": "Sponsored listings at {{company}}",
+                                 "body": f"Hi {{{{first_name}}}},\n\nI noticed "
+                                         f"{{{{verified_observation}}}}.\n\n{pitch}\n\n{close}\n\nHemin"}
+    cfg["outreach"] = {
+        "mode": "templates", "timezone": "America/Los_Angeles", "send_hour": 9,
+        "preview_accounts": 10,
+        "campaigns": {
+            "M1": {"name": "Vertical marketplaces",
+                   "steps": [step(M1_PITCH, "Would a short outline of a one-surface pilot be useful?")]},
+            "F1": {"name": "Feed-based communities",
+                   "steps": [step(F1_PITCH, "Would a short native-sponsorship outline be useful?")]},
+        },
+    }
+    cfg["compliance"] = {
+        "require_footer": True,
+        "postal_address": "440 N Wolfe Rd, Suite E133, Sunnyvale, CA, 94085",
+        "footer": "{sender_name} | {company} | {postal_address}\n"
+                  "Business outreach about {company}. Reply \"no thanks\" to stop.",
+    }
     return cfg
 
 
@@ -214,11 +241,30 @@ async def seed(db_path: Path):
             email=emails[-1], email_verified=True, email_status="verified",
             company=name, industry=industry, source="team_page", score=8)))
 
+    # Researched accounts: a campaign, an owner, a score and the sourced,
+    # dated observation behind each first email (what `franco import` records).
+    campaign_ids: dict[str, str] = {}
+    for key, name in (("M1", "Vertical marketplaces"), ("F1", "Feed-based communities")):
+        campaign_ids[key] = await state.add_campaign(Campaign(
+            id="", name=name, channel="email", status="active", campaign_key=key,
+            sequence=[EmailStep(step=1, subject="(approved copy)", body="", day=1)],
+            prospect_ids=[]))
+    checked = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d 00:00:00")
     send_at = datetime.now().replace(hour=9, minute=15, second=0) + timedelta(days=1)
-    for n, (pi, subject, observation, pitch, close) in enumerate(OUTBOX):
+    for n, (pi, subject, observation, pitch, close, page) in enumerate(OUTBOX):
+        ci = CONTACTS[pi][0]
+        domain, industry = COMPANIES[ci][1], COMPANIES[ci][2]
+        key = "M1" if pitch == M1_PITCH else "F1"
+        await state.update_company_account(company_ids[ci], campaign_key=key, owner="Hemin",
+                                           segment=industry, qualified_score=8 - n % 2)
+        await state.add_observation(
+            "TRIGGER_OBSERVATION", company_id=company_ids[ci], collector="import",
+            value_text=observation[0].lower() + observation[1:] if observation.startswith("The") else observation,
+            evidence_url=f"https://{domain}{page}", observed_at=checked, confidence=1.0)
         await state.add_outbox_item(
             prospect_id=prospect_ids[pi], to_email=emails[pi], subject=subject,
             body=email_body(CONTACTS[pi][1], observation, pitch, close),
+            campaign_id=campaign_ids[key], step=1, seq_day=1,
             provider="gmail", send_at=(send_at + timedelta(minutes=7 * n)).isoformat())
 
     for action in ("prospect", "write_campaign", "handle_replies", "send_outbox",

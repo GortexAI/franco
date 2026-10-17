@@ -7,6 +7,15 @@ minor versions can still change behaviour.
 
 ## [Unreleased]
 
+### Security
+
+- **Bounces are verified before Franco acts on them.** Anyone can send a message that looks like a bounce, and acting on one marks a contact's address invalid and moves the bounce rate toward the kill switch. A delivery report is acted on only when it references the Message-ID of an email Franco actually sent (`In-Reply-To` or `References`) and names that email's recipient. A report that matches only by naming an address Franco emailed in the last 14 days could be forged by anyone who knows whom Franco emails, so it is logged as `bounce_needs_review` for a person to check, and changes nothing. Unmatched reports are logged as `bounce_ignored`.
+- Temporary delivery delays ("delayed", `4.x.x` statuses) are no longer treated as hard bounces, and the same bounce is never counted twice.
+
+### Changed
+
+- The README's dashboard GIF shows the current Outbox: approved-copy campaigns in preview, sign-off cards, and each draft's campaign, owner, sourced observation and compliance footer.
+
 ## [0.5.0] — 2026-10-16
 
 ### Added

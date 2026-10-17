@@ -12,7 +12,7 @@ upgrade cleanly in place.
 import json
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 
 import aiosqlite
@@ -1252,6 +1252,18 @@ class StateManager:
                 "AND date(sent_at) = date('now')"
             ) as cursor:
                 return (await cursor.fetchone())[0]
+
+    async def find_recent_sent_to(self, email: str, days: int = 14) -> dict | None:
+        """The newest email Franco actually sent to this address lately."""
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM outbox WHERE to_email = ? AND status = 'sent' "
+                "AND sent_at >= ? ORDER BY sent_at DESC LIMIT 1",
+                (_norm(email), (_utcnow() - timedelta(days=days)).isoformat()),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
     async def find_outbox_by_message_id(self, message_id: str) -> dict | None:
         if not message_id:
