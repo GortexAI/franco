@@ -14,6 +14,7 @@ it isn't a MailProvider because Instantly owns sequencing/sending itself.
 """
 
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
@@ -53,9 +54,53 @@ BOUNCE_SUBJECTS = (
 
 
 def looks_like_bounce(from_email: str, subject: str) -> bool:
+    """A *candidate* bounce. Anyone can send a message that looks like one,
+    so the handler only acts on it after matching it to an email Franco
+    actually sent (see parse_bounce and referenced_ids)."""
     f = (from_email or "").lower()
     s = (subject or "").lower()
     return any(m in f for m in BOUNCE_SENDERS) or any(m in s for m in BOUNCE_SUBJECTS)
+
+
+_DSN_RECIPIENT = re.compile(
+    r"^(?:final|original)-recipient:\s*rfc822;\s*<?([^>\s]+@[^>\s]+)>?", re.I | re.M)
+_DSN_STATUS = re.compile(r"^status:\s*([245])\.\d{1,3}\.\d{1,3}", re.I | re.M)
+_ADDRESS = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+_TRANSIENT = ("delay", "will retry", "'ll retry", "keep trying", "still trying",
+              "temporary problem", "temporarily", "try again later")
+
+
+@dataclass
+class BounceInfo:
+    recipients: set[str]      # addresses the report says failed ("" set if none found)
+    permanent: bool           # False for "delayed, still trying" (4.x.x) notices
+
+
+def parse_bounce(msg: "InboundMessage") -> BounceInfo:
+    """Who a delivery report says failed, and whether it gave up.
+
+    Uses the RFC 3464 fields when the text carries them (Final-Recipient,
+    Status), else the addresses in the text and its wording.
+    """
+    text = f"{msg.subject}\n{msg.body}"
+    recipients = {a.lower() for a in _DSN_RECIPIENT.findall(text)}
+    if not recipients:
+        recipients = {a.lower().strip(".") for a in _ADDRESS.findall(msg.body or "")}
+    statuses = _DSN_STATUS.findall(text)
+    if statuses:
+        permanent = "5" in statuses
+    else:
+        lowered = text.lower()
+        permanent = not any(hint in lowered for hint in _TRANSIENT)
+    return BounceInfo(recipients=recipients, permanent=permanent)
+
+
+def referenced_ids(msg: "InboundMessage") -> list[str]:
+    """Message-IDs the report points back to (In-Reply-To, then References)."""
+    ids = [msg.in_reply_to] if msg.in_reply_to else []
+    refs = (msg.headers or {}).get("references", "")
+    ids += [r for r in re.findall(r"<[^>]+>", refs) if r not in ids]
+    return [i.strip() for i in ids if i.strip()]
 
 
 class MailProvider(ABC):

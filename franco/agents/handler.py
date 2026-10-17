@@ -500,12 +500,51 @@ class Handler:
             logger.info("Handler: no new replies.")
         return complete
 
+    async def _match_bounce(self, msg) -> tuple[dict | None, str]:
+        """The sent email a delivery report is about, or why it isn't trusted.
+
+        Anyone can send mail that *looks* like a bounce. Acting on it marks a
+        contact's address invalid and moves the bounce rate toward the kill
+        switch, so a report must point at an email Franco really sent (by
+        Message-ID, or by naming an address Franco emailed in the last two
+        weeks) and must name that email's recipient.
+        """
+        from franco.integrations.mail_provider import parse_bounce, referenced_ids
+
+        info = parse_bounce(msg)
+        item = None
+        for ref in referenced_ids(msg):
+            item = await self.state.find_outbox_by_message_id(ref)
+            if item:
+                break
+        if item is None:
+            for address in sorted(info.recipients):
+                item = await self.state.find_recent_sent_to(address)
+                if item:
+                    break
+        if item is None or item.get("status") != "sent":
+            return None, "matches no email Franco sent"
+        if info.recipients and item["to_email"].lower() not in info.recipients:
+            return None, "names a different recipient than the email it refers to"
+        if (item.get("error") or "") == "bounced":
+            return None, "already counted"
+        if not info.permanent:
+            return None, "a temporary delay, not a failure"
+        return item, ""
+
     async def _handle_bounce(self, msg):
-        """A bounce is a data bug AND a reputation threat. Fix both."""
-        outbox_item = await self.state.find_outbox_by_message_id(msg.in_reply_to)
-        prospect = None
-        if outbox_item:
-            prospect = await self.state.get_prospect(outbox_item["prospect_id"])
+        """A bounce is a data bug AND a reputation threat. Fix both, but
+        only for reports that match an email Franco really sent."""
+        outbox_item, why_not = await self._match_bounce(msg)
+        if outbox_item is None:
+            logger.info(f"Handler: delivery report not acted on: {why_not}.")
+            await self.state.log_action(
+                action_type="bounce_ignored", agent="handler",
+                details={"reason": why_not, "subject": (msg.subject or "")[:80]},
+            )
+            return
+        await self.state.update_outbox_item(outbox_item["id"], error="bounced")
+        prospect = await self.state.get_prospect(outbox_item["prospect_id"])
 
         if prospect:
             await self.state.update_prospect_email(
